@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getHolidays, createHoliday, deleteHoliday } from "../services/holidayService.js";
+import { toErrorMessage } from "../services/httpError.js";
 import { HolidayCalendar } from "../components/calendar/HolidayCalendar.jsx";
 import { RoleGate } from "../components/auth/RoleGate.jsx";
 import { useAuth } from "../hooks/useAuth.js";
@@ -23,7 +24,7 @@ function HolidayRow({ holiday, canManage, onChanged }) {
             await deleteHoliday(holiday.id);
             onChanged();
         } catch (err) {
-            setError(err.response?.data?.message || "Unable to delete holiday");
+            setError(toErrorMessage(err, "Unable to delete holiday"));
             setBusy(false);
         }
     }
@@ -128,7 +129,7 @@ export function HolidaysPage() {
                 reload();
             }
         } catch (err) {
-            setFormError(err.response?.data?.message || "Unable to create holiday");
+            setFormError(toErrorMessage(err, "Unable to create holiday"));
         } finally {
             setSubmitting(false);
         }

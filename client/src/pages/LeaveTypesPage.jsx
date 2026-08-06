@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getLeaveTypes, createLeaveType, updateLeaveTypeStatus } from "../services/leaveTypeService.js";
+import { toErrorMessage } from "../services/httpError.js";
 import { BADGE_BASE_CLASSES } from "../constants/badges.js";
 
 const emptyForm = {
@@ -25,7 +26,7 @@ function LeaveTypeRow({ leaveType, onChanged }) {
             await updateLeaveTypeStatus(leaveType.id, !leaveType.is_active);
             await onChanged();
         } catch (err) {
-            setError(err.response?.data?.message || "Unable to update status");
+            setError(toErrorMessage(err, "Unable to update status"));
         } finally {
             setBusy(false);
         }
@@ -125,7 +126,7 @@ export function LeaveTypesPage() {
             setShowForm(false);
             reload();
         } catch (err) {
-            setFormError(err.response?.data?.message || "Unable to create leave type");
+            setFormError(toErrorMessage(err, "Unable to create leave type"));
         } finally {
             setSubmitting(false);
         }

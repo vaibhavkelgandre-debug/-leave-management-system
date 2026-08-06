@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { updateManager, updateStatus } from "../../services/userService.js";
+import { toErrorMessage } from "../../services/httpError.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { ManagerSelect } from "./ManagerSelect.jsx";
 
@@ -59,7 +60,7 @@ export function EmployeeTableRow({ user, users, onChanged }) {
             setIsEditingManager(false);
             await onChanged();
         } catch (err) {
-            setError(err.response?.data?.message || "Unable to update manager");
+            setError(toErrorMessage(err, "Unable to update manager"));
         } finally {
             setSaving(false);
         }
@@ -73,7 +74,7 @@ export function EmployeeTableRow({ user, users, onChanged }) {
             await updateStatus(user.id, nextStatus);
             await onChanged();
         } catch (err) {
-            setStatusError(err.response?.data?.message || "Unable to update status");
+            setStatusError(toErrorMessage(err, "Unable to update status"));
         } finally {
             setStatusSaving(false);
         }
