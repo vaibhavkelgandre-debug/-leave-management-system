@@ -1,0 +1,13 @@
+CREATE TABLE IF NOT EXISTS holidays (
+
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+
+    name VARCHAR(150) NOT NULL,
+
+    holiday_date DATE NOT NULL UNIQUE,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+
+);

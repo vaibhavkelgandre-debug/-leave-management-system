@@ -4,13 +4,17 @@
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
- "scripts": {
+  "scripts": {
     "dev": "nodemon src/server.js",
-    "test": "vitest",
-    "test:run": "vitest run",
-    "test:watch": "vitest"
+    "start": "node src/server.js",
+    "migrate": "node src/scripts/runMigrations.js",
+    "test": "cross-env NODE_ENV=test vitest",
+    "test:run": "cross-env NODE_ENV=test vitest run",
+    "test:watch": "cross-env NODE_ENV=test vitest"
   },
-
+  "engines": {
+    "node": ">=20 <23"
+  },
   "jest": {
     "testEnvironment": "node"
   },
@@ -18,12 +22,18 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "pg": "^8.22.0"
+    "google-auth-library": "^11.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "pg": "^8.22.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
+    "cross-env": "^10.1.0",
     "nodemon": "^3.1.14",
     "supertest": "^7.2.2",
     "vitest": "^4.1.10"
