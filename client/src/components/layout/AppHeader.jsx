@@ -23,10 +23,7 @@ export function AppHeader() {
     return (
         <header className="border-b border-slate-200 bg-white">
             <div className="mx-auto flex max-w-5xl items-center justify-between px-4 py-3">
-                <div className="flex items-center gap-6">
-                    <span className="text-base font-semibold text-slate-900">Leave Management System</span>
-                    <NavBar />
-                </div>
+                <span className="text-base font-semibold text-slate-900">Leave Management System</span>
                 <div className="flex items-center gap-3">
                     <span className="text-sm text-slate-700">
                         {user.first_name} {user.last_name}
@@ -46,6 +43,11 @@ export function AppHeader() {
                         Logout
                     </button>
                 </div>
+            </div>
+            {/* Nav sits on its own row so the descriptive labels and grouping
+                have room instead of being squeezed next to the brand. */}
+            <div className="mx-auto max-w-5xl border-t border-slate-100 px-4 py-2">
+                <NavBar />
             </div>
         </header>
     );

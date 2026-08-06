@@ -7,6 +7,9 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { TeamPage } from "./pages/TeamPage.jsx";
 import { EmployeesPage } from "./pages/EmployeesPage.jsx";
+import { MyBalancesPage } from "./pages/MyBalancesPage.jsx";
+import { LeaveTypesPage } from "./pages/LeaveTypesPage.jsx";
+import { HolidaysPage } from "./pages/HolidaysPage.jsx";
 import { NotFoundPage } from "./pages/NotFoundPage.jsx";
 import { ForbiddenPage } from "./pages/ForbiddenPage.jsx";
 import { AppLayout } from "./components/layout/AppLayout.jsx";
@@ -32,12 +35,18 @@ function App() {
                 <Route path="/dashboard" element={<AppLayout />}>
                     <Route index element={<DashboardPage />} />
 
+                    <Route path="my-leave" element={<MyBalancesPage />} />
+                    {/* Everyone can view the holiday calendar; only HR sees the
+                        add/delete controls inside the page. */}
+                    <Route path="holidays" element={<HolidaysPage />} />
+
                     <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} />}>
                         <Route path="team" element={<TeamPage />} />
                     </Route>
 
                     <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN]} />}>
                         <Route path="employees" element={<EmployeesPage />} />
+                        <Route path="leave-types" element={<LeaveTypesPage />} />
                     </Route>
 
                     <Route path="403" element={<ForbiddenPage />} />
