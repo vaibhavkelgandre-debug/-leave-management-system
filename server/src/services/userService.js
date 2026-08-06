@@ -1,4 +1,5 @@
 import {
+    deleteExpiredInvitees,
     findAllUsers,
     findSubtreeUsers,
     findUserById,
@@ -9,6 +10,11 @@ import { assertNoCycle } from "./reportingService.js";
 import { badRequest, notFound } from "../utils/appError.js";
 
 export async function listUsersFor(actor) {
+    // Swept here rather than on a schedule: the project has no job runner, and
+    // listing users is the moment the stale rows would otherwise be seen. Same
+    // self-healing-on-read approach used for leave balances.
+    await deleteExpiredInvitees();
+
     if (actor.role === "HR_ADMIN") {
         return findAllUsers();
     }

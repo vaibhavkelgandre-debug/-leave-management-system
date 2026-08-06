@@ -23,6 +23,25 @@ export async function findAllUsers() {
     return result.rows;
 }
 
+// Removes people who never accepted their invite before it expired. Deleting the
+// user (rather than just hiding them) is deliberate: users.email is UNIQUE, so a
+// lingering stale row would permanently block HR from re-inviting that person.
+// Scoped to status = 'INVITED' so an accepted account can never be caught by this,
+// even if an old invitation row is left behind. Dependent rows (invitations,
+// leave balances, oauth accounts, password resets) cascade.
+export async function deleteExpiredInvitees() {
+    const result = await pool.query(
+        `DELETE FROM users u
+         USING invitations i
+         WHERE i.user_id = u.id
+           AND u.status = 'INVITED'
+           AND i.accepted_at IS NULL
+           AND i.expires_at < CURRENT_TIMESTAMP
+         RETURNING u.id`
+    );
+    return result.rows.map((row) => row.id);
+}
+
 export async function findUserById(id) {
     const result = await pool.query(
         `SELECT ${PUBLIC_USER_COLUMNS}

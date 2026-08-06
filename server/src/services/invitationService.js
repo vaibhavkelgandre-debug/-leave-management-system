@@ -17,8 +17,10 @@ import { signAuthToken } from "../utils/jwt.js";
 import { badRequest, unauthorized } from "../utils/appError.js";
 
 // How long an invite link stays valid before the recipient must be re-invited — keeps
-// stale, unused invites from being redeemable indefinitely.
-const INVITE_TOKEN_TTL_HOURS = Number(process.env.INVITE_TOKEN_TTL_HOURS) || 72;
+// stale, unused invites from being redeemable indefinitely. Once this lapses the
+// account itself is removed (see deleteExpiredInvitees), so the person disappears
+// from the employee list and their email is freed up for a fresh invite.
+const INVITE_TOKEN_TTL_HOURS = Number(process.env.INVITE_TOKEN_TTL_HOURS) || 24;
 
 // Onboards a new employee/manager without public self-registration: HR creates the
 // account up front in an INVITED (inactive) state and emails a one-time link that lets
