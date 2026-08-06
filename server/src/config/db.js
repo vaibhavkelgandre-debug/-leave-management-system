@@ -1,7 +1,14 @@
-import { Pool } from "pg";
+import { Pool, types } from "pg";
 import dotenv from "dotenv";
 
 dotenv.config();
+
+// By default node-postgres parses DATE columns into JS Date objects at local
+// midnight; serializing that to JSON then converts to UTC, shifting the date
+// backward in any timezone ahead of UTC (e.g. 2027-01-01 IST becomes
+// 2026-12-31T18:30:00Z). Returning the raw "YYYY-MM-DD" string instead avoids
+// that shift entirely and matches the format callers already send us.
+types.setTypeParser(types.builtins.DATE, (value) => value);
 
 const useSsl = process.env.NODE_ENV === "production" || process.env.DB_SSL === "true";
 
