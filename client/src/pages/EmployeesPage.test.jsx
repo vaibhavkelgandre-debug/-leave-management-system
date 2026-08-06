@@ -31,57 +31,17 @@ describe("EmployeesPage", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load employees");
     });
 
-    it("hides the invite form until 'Add Employee' is clicked", async () => {
+    it("links to the invite page instead of showing an inline form", async () => {
         userService.getUsers.mockResolvedValue([]);
         renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
         await screen.findByText("Employees");
 
+        // The form now lives on its own route, so none of its fields render here.
         expect(screen.queryByLabelText(/first name/i)).not.toBeInTheDocument();
-
-        await userEvent.click(screen.getByRole("button", { name: /add employee/i }));
-        expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
-
-        await userEvent.click(screen.getByRole("button", { name: /cancel/i }));
-        expect(screen.queryByLabelText(/first name/i)).not.toBeInTheDocument();
-    });
-
-    it("shows the manager field only when the role is Employee", async () => {
-        userService.getUsers.mockResolvedValue([makeUser({ role: ROLES.MANAGER })]);
-        renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
-        await screen.findByText("Employees");
-        await userEvent.click(screen.getByRole("button", { name: /add employee/i }));
-
-        expect(screen.getByLabelText(/manager/i)).toBeInTheDocument();
-
-        await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.MANAGER);
-        expect(screen.queryByLabelText(/manager/i)).not.toBeInTheDocument();
-
-        await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.EMPLOYEE);
-        expect(screen.getByLabelText(/manager/i)).toBeInTheDocument();
-    });
-
-    it("submits the invite and shows the returned invite link", async () => {
-        const manager = makeUser({ id: "mgr-1", role: ROLES.MANAGER });
-        userService.getUsers.mockResolvedValue([manager]);
-        userService.inviteEmployee.mockResolvedValue({
-            user: makeUser({ id: "new-1" }),
-            inviteLink: "http://localhost:5173/invite/abc123",
-        });
-
-        renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
-        await screen.findByText("Employees");
-        await userEvent.click(screen.getByRole("button", { name: /add employee/i }));
-
-        await userEvent.type(screen.getByLabelText(/first name/i), "New");
-        await userEvent.type(screen.getByLabelText(/last name/i), "Hire");
-        await userEvent.type(screen.getByLabelText(/email/i), "new@example.com");
-        await userEvent.selectOptions(screen.getByLabelText(/manager/i), "mgr-1");
-        await userEvent.click(screen.getByRole("button", { name: /^invite$/i }));
-
-        expect(userService.inviteEmployee).toHaveBeenCalledWith(
-            expect.objectContaining({ firstName: "New", lastName: "Hire", email: "new@example.com", managerId: "mgr-1" })
+        expect(screen.getByRole("link", { name: /add employee/i })).toHaveAttribute(
+            "href",
+            "/dashboard/employees/new"
         );
-        expect(await screen.findByText(/abc123/)).toBeInTheDocument();
     });
 
     it("lets HR change an employee's manager", async () => {
