@@ -4,6 +4,7 @@ export default defineConfig({
     test: {
         environment: "node",
         globals: true,
-        setupFiles: "./src/tests/setup.js",
+        setupFiles: ["./src/tests/integration/setup.js"],
+        fileParallelism: false,
     },
 });
