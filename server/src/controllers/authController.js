@@ -1,0 +1,105 @@
+import * as authService from "../services/authService.js";
+import * as invitationService from "../services/invitationService.js";
+import * as passwordResetService from "../services/passwordResetService.js";
+import { getUserById } from "../services/userService.js";
+import { sendSuccess } from "../utils/apiResponse.js";
+import { setAuthCookie, clearAuthCookie } from "../utils/cookies.js";
+
+// One-time bootstrap endpoint for creating the very first HR_ADMIN account using the
+// shared registration code — there is no public sign-up, so this is the only way an
+// HR account gets created outside of an invite.
+export async function registerHrAdmin(req, res, next) {
+    try {
+        const { token, user } = await authService.registerHrRoot(req.body);
+        setAuthCookie(res, token);
+        sendSuccess(res, 201, "HR admin registered", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Standard email/password login for any existing user (HR_ADMIN, MANAGER, EMPLOYEE).
+export async function login(req, res, next) {
+    try {
+        const { token, user } = await authService.loginWithPassword(req.body);
+        setAuthCookie(res, token);
+        sendSuccess(res, 200, "Logged in", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Alternative login method via Google OAuth — only signs in users who already have an
+// account (from HR invite or HR-admin registration); it never creates new accounts.
+export async function googleLogin(req, res, next) {
+    try {
+        const { token, user } = await authService.loginWithGoogle(req.body.idToken);
+        setAuthCookie(res, token);
+        sendSuccess(res, 200, "Logged in", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Ends the session by clearing the auth cookie; there's no server-side token to
+// invalidate since auth is stateless JWT-in-cookie.
+export async function logout(req, res) {
+    clearAuthCookie(res);
+    sendSuccess(res, 200, "Logged out", null);
+}
+
+// Returns the profile of whoever the auth middleware already identified from the
+// request's token — used by the client to hydrate session state on load/refresh.
+export async function getCurrentUser(req, res, next) {
+    try {
+        const user = await getUserById(req.user.id);
+        sendSuccess(res, 200, "Current user", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Lets the invite-acceptance page check a token is still valid before showing the
+// set-password form, without requiring the user to be authenticated yet.
+export async function verifyInvitation(req, res, next) {
+    try {
+        const invitation = await invitationService.verifyInvitationToken(req.body.token);
+        sendSuccess(res, 200, "Invitation is valid", invitation);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Completes onboarding for an HR-invited user: sets their password and activates the
+// account, then logs them in immediately so they don't have to re-authenticate.
+export async function acceptInvitation(req, res, next) {
+    try {
+        const { token, user } = await invitationService.acceptInvitation(req.body);
+        setAuthCookie(res, token);
+        sendSuccess(res, 200, "Invitation accepted", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Starts the forgot-password flow. Response message is identical whether or not the
+// email exists, to avoid leaking which addresses have accounts.
+export async function requestPasswordReset(req, res, next) {
+    try {
+        await passwordResetService.requestPasswordReset(req.body.email);
+        sendSuccess(res, 200, "If that email exists, a password reset link has been sent", null);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Finishes the forgot-password flow by validating the reset token and applying the new
+// password.
+export async function confirmPasswordReset(req, res, next) {
+    try {
+        await passwordResetService.confirmPasswordReset(req.body);
+        sendSuccess(res, 200, "Password reset successfully", null);
+    } catch (error) {
+        next(error);
+    }
+}

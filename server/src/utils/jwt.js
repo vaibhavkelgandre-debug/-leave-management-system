@@ -1,0 +1,17 @@
+import jwt from "jsonwebtoken";
+
+// Issues the signed session token stored in the auth cookie after
+// login/OAuth; a bounded expiry (default 8h) limits how long a stolen or
+// leaked token stays valid.
+export function signAuthToken(payload) {
+    return jwt.sign(payload, process.env.JWT_SECRET, {
+        expiresIn: process.env.JWT_EXPIRES_IN || "8h",
+    });
+}
+
+// Verifies the auth cookie's signature/expiry on every authenticated
+// request; throws if the token is invalid or expired, which requireAuth
+// treats as "session expired".
+export function verifyAuthToken(token) {
+    return jwt.verify(token, process.env.JWT_SECRET);
+}
