@@ -10,6 +10,7 @@ import {
     markAccepted,
 } from "../repositories/invitationRepository.js";
 import { assertManagerAllowed } from "./reportingService.js";
+import { seedBalancesForUser } from "./leaveBalanceService.js";
 import { generateSecureToken, hashSecureToken } from "../utils/secureToken.js";
 import { hashPassword } from "../utils/password.js";
 import { signAuthToken } from "../utils/jwt.js";
@@ -43,6 +44,10 @@ export async function inviteEmployee({ firstName, lastName, email, role, manager
         managerId: resolvedManagerId,
         status: "INVITED",
     });
+
+    // Every employee needs a balance for each active leave type (FR-008) as
+    // soon as they exist, rather than waiting for a scheduled job.
+    await seedBalancesForUser(user.id);
 
     const { rawToken, tokenHash } = generateSecureToken();
     const expiresAt = new Date(Date.now() + INVITE_TOKEN_TTL_HOURS * 60 * 60 * 1000);

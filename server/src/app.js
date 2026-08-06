@@ -5,6 +5,7 @@ import cookieParser from "cookie-parser";
 import authRoutes from "./routes/authRoutes.js";
 import userRoutes from "./routes/userRoutes.js";
 import leaveTypeRoutes from "./routes/leaveTypeRoutes.js";
+import leaveBalanceRoutes from "./routes/leaveBalanceRoutes.js";
 import holidayRoutes from "./routes/holidayRoutes.js";
 import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.js";
 import { sendSuccess } from "./utils/apiResponse.js";
@@ -40,6 +41,7 @@ app.get("/health", (req, res) => {
 app.use("/api/auth", authRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/leave-types", leaveTypeRoutes);
+app.use("/api/leave-balances", leaveBalanceRoutes);
 app.use("/api/holidays", holidayRoutes);
 
 // Catch-all for unmatched routes, then centralized error handling — keeps

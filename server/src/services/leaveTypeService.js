@@ -5,10 +5,15 @@ import {
     updateLeaveType as updateLeaveTypeRepo,
     updateLeaveTypeStatus as updateLeaveTypeStatusRepo,
 } from "../repositories/leaveTypeRepository.js";
+import * as leaveBalanceService from "./leaveBalanceService.js";
 import { notFound } from "../utils/appError.js";
 
 export async function createLeaveType(payload) {
-    return insertLeaveType(payload);
+    const leaveType = await insertLeaveType(payload);
+    // Extend the new leave type to every existing active employee right away
+    // instead of waiting for each of them to first read their balances.
+    await leaveBalanceService.backfillBalancesForLeaveType(leaveType.id);
+    return leaveType;
 }
 
 export async function listLeaveTypes(includeInactive) {
