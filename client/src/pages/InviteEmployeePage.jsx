@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { getUsers, inviteEmployee } from "../services/userService.js";
+import { toErrorMessage } from "../services/httpError.js";
 import { ManagerSelect } from "../components/team/ManagerSelect.jsx";
+import { isValidEmail } from "../utils/validation.js";
 import { ROLES } from "../constants/roles.js";
 
 const emptyForm = { firstName: "", lastName: "", email: "", role: ROLES.EMPLOYEE, managerId: "" };
@@ -40,25 +42,48 @@ export function InviteEmployeePage() {
 
     function handleChange(event) {
         const { name, value } = event.target;
-        setForm((prev) => ({ ...prev, [name]: value }));
+        setForm((prev) => ({
+            ...prev,
+            [name]: value,
+            // Who they may report to depends on the role, so a previously picked
+            // person can become invalid — clear it rather than submit a bad pair.
+            ...(name === "role" ? { managerId: "" } : {}),
+        }));
     }
 
-    const managerRequired = form.role === ROLES.EMPLOYEE;
-    const managerOptions = (users ?? []).filter((u) => u.role !== ROLES.EMPLOYEE);
+    // HR admins sit at the top of the tree and have nobody to report to.
+    const needsReportingLine = form.role !== ROLES.HR_ADMIN;
+
+    // Mirrors the server's hierarchy rule (reportingService.js): an employee may
+    // report to a manager or an HR admin, but a manager only to an HR admin.
+    const reportingOptions = (users ?? []).filter((u) =>
+        form.role === ROLES.MANAGER ? u.role === ROLES.HR_ADMIN : u.role !== ROLES.EMPLOYEE
+    );
+
+    const reportingLabel = form.role === ROLES.MANAGER ? "Reporting HR admin" : "Manager";
 
     async function handleInvite(event) {
         event.preventDefault();
-        setSubmitting(true);
         setInviteError(null);
         setInviteResult(null);
 
+        // The browser's type="email" check accepts a domain with no dot (e.g.
+        // "viraj@123"), which the server then rejects. Catch it here so the user
+        // gets a precise message instead of a failed round-trip.
+        if (!isValidEmail(form.email.trim())) {
+            setInviteError("Enter a valid email address");
+            return;
+        }
+
+        setSubmitting(true);
+
         try {
-            const payload = managerRequired ? form : { ...form, managerId: null };
+            const payload = needsReportingLine ? form : { ...form, managerId: null };
             const result = await inviteEmployee(payload);
             setInviteResult(result);
             setForm(emptyForm);
         } catch (err) {
-            setInviteError(err.response?.data?.message || "Unable to invite employee");
+            setInviteError(toErrorMessage(err, "Unable to invite employee"));
         } finally {
             setSubmitting(false);
         }
@@ -137,18 +162,18 @@ export function InviteEmployeePage() {
                         </select>
                     </div>
 
-                    {managerRequired && (
+                    {needsReportingLine && (
                         <div>
                             <label htmlFor="managerId" className={labelClasses}>
-                                Manager
+                                {reportingLabel}
                             </label>
                             <ManagerSelect
                                 id="managerId"
-                                label="Manager"
+                                label={reportingLabel}
                                 value={form.managerId}
                                 onChange={(event) => setForm((prev) => ({ ...prev, managerId: event.target.value }))}
-                                options={managerOptions}
-                                targetRole={ROLES.EMPLOYEE}
+                                options={reportingOptions}
+                                targetRole={form.role}
                                 allowNone={false}
                                 required
                             />
