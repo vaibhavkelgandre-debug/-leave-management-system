@@ -1,58 +1,51 @@
-import { useEffect, useState } from "react";
-import { getUsers } from "./services/userServices.js";
+import { Routes, Route } from "react-router-dom";
+import { HomePage } from "./pages/HomePage.jsx";
+import { LoginPage } from "./pages/LoginPage.jsx";
+import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.jsx";
+import { ResetPasswordPage } from "./pages/ResetPasswordPage.jsx";
+import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
+import { DashboardPage } from "./pages/DashboardPage.jsx";
+import { TeamPage } from "./pages/TeamPage.jsx";
+import { EmployeesPage } from "./pages/EmployeesPage.jsx";
+import { NotFoundPage } from "./pages/NotFoundPage.jsx";
+import { ForbiddenPage } from "./pages/ForbiddenPage.jsx";
+import { AppLayout } from "./components/layout/AppLayout.jsx";
+import { RequireAuth } from "./components/routing/RequireAuth.jsx";
+import { RequireRole } from "./components/routing/RequireRole.jsx";
+import { PublicOnlyRoute } from "./components/routing/PublicOnlyRoute.jsx";
+import { ROLES } from "./constants/roles.js";
 
 function App() {
-
-    const [users, setUsers] = useState([]);
-
-    useEffect(() => {
-
-        async function loadUsers() {
-
-            try {
-
-                const data = await getUsers();
-
-                setUsers(data);
-
-            } catch (error) {
-
-                console.log(error);
-
-            }
-
-        }
-
-        loadUsers();
-
-    }, []);
-
     return (
+        <Routes>
+            <Route path="/" element={<HomePage />} />
 
-        <div>
+            <Route element={<PublicOnlyRoute />}>
+                <Route path="/login" element={<LoginPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+            </Route>
 
-            <h1>Users</h1>
+            <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
+            <Route path="/invite/:token" element={<AcceptInvitePage />} />
 
-            {
+            <Route element={<RequireAuth />}>
+                <Route path="/dashboard" element={<AppLayout />}>
+                    <Route index element={<DashboardPage />} />
 
-                users.map((user) => (
+                    <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} />}>
+                        <Route path="team" element={<TeamPage />} />
+                    </Route>
 
-                    <div key={user.employee_code}>
-                        <p>{user.employee_code}</p>
-                        <h2>{user.first_name}</h2>
-                        <p>{user.email}</p>
-                        <p>{user.phone}</p>
+                    <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN]} />}>
+                        <Route path="employees" element={<EmployeesPage />} />
+                    </Route>
 
-                    </div>
-
-                ))
-
-            }
-
-        </div>
-
+                    <Route path="403" element={<ForbiddenPage />} />
+                    <Route path="*" element={<NotFoundPage />} />
+                </Route>
+            </Route>
+        </Routes>
     );
-
 }
 
 export default App;
