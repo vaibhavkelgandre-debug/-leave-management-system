@@ -2,6 +2,8 @@ import { findRoleByName } from "../../../repositories/roleRepository.js";
 import { insertUser } from "../../../repositories/userRepository.js";
 import { insertLeaveType } from "../../../repositories/leaveTypeRepository.js";
 import { insertHoliday } from "../../../repositories/holidayRepository.js";
+import { insertDelegation } from "../../../repositories/delegationRepository.js";
+import { submitLeaveRequest } from "../../../services/leaveRequestService.js";
 import { hashPassword } from "../../../utils/password.js";
 
 export const DEFAULT_PASSWORD = "Password123!";
@@ -51,4 +53,28 @@ export async function createLeaveType({
 
 export async function createHoliday({ name = "Test Holiday", startDate = "2026-01-01", endDate } = {}) {
     return insertHoliday({ name, startDate, endDate: endDate || startDate });
+}
+
+// Goes through the real service (not a direct repository insert) so a test's
+// setup produces the same ledger/audit side effects a real submission would
+// — anything asserting on balance state after further actions needs that.
+export async function createLeaveRequest({
+    employeeId,
+    leaveTypeId,
+    startDate = "2027-02-01",
+    endDate = "2027-02-01",
+    startHalfDay = false,
+    endHalfDay = false,
+    reason = "Test reason",
+} = {}) {
+    return submitLeaveRequest(employeeId, { leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, reason });
+}
+
+export async function createDelegation({
+    managerId,
+    delegateId,
+    startDate = "2027-01-01",
+    endDate = "2027-01-31",
+} = {}) {
+    return insertDelegation({ managerId, delegateId, startDate, endDate });
 }

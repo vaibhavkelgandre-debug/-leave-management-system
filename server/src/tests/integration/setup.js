@@ -13,7 +13,9 @@ const { default: pool } = await import("../../config/db.js");
 
 beforeEach(async () => {
     await pool.query(
-        "TRUNCATE users, invitations, oauth_accounts, password_resets, leave_balances, leave_types, holidays RESTART IDENTITY CASCADE"
+        `TRUNCATE users, invitations, oauth_accounts, password_resets, leave_balances, leave_types, holidays,
+                  leave_requests, leave_balance_ledger, delegations, audit_logs
+         RESTART IDENTITY CASCADE`
     );
 });
 

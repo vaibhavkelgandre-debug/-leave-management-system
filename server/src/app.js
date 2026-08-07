@@ -7,6 +7,8 @@ import userRoutes from "./routes/userRoutes.js";
 import leaveTypeRoutes from "./routes/leaveTypeRoutes.js";
 import leaveBalanceRoutes from "./routes/leaveBalanceRoutes.js";
 import holidayRoutes from "./routes/holidayRoutes.js";
+import leaveRequestRoutes from "./routes/leaveRequestRoutes.js";
+import delegationRoutes from "./routes/delegationRoutes.js";
 import { notFoundHandler, errorHandler } from "./middlewares/errorHandler.js";
 import { sendSuccess } from "./utils/apiResponse.js";
 
@@ -43,6 +45,8 @@ app.use("/api/users", userRoutes);
 app.use("/api/leave-types", leaveTypeRoutes);
 app.use("/api/leave-balances", leaveBalanceRoutes);
 app.use("/api/holidays", holidayRoutes);
+app.use("/api/leave-requests", leaveRequestRoutes);
+app.use("/api/delegations", delegationRoutes);
 
 // Catch-all for unmatched routes, then centralized error handling — keeps
 // error response shaping (the { success, message, errors } envelope) in one place.
