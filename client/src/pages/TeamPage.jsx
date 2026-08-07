@@ -7,35 +7,39 @@ import { RoleBadge, StatusBadge } from "../components/ui/Badge.jsx";
 function TeamTable({ rows, showsReportsTo }) {
     return (
         <Card className="overflow-hidden">
-            <table className="w-full text-left text-sm">
-                <thead className="bg-slate-50 text-slate-500">
-                    <tr>
-                        <th className="px-4 py-2 font-medium">Person</th>
-                        <th className="px-4 py-2 font-medium">Role</th>
-                        <th className="px-4 py-2 font-medium">Status</th>
-                        {showsReportsTo && <th className="px-4 py-2 font-medium">Reports to</th>}
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                    {rows.map((person) => (
-                        <tr key={person.id} className="hover:bg-slate-50">
-                            <td className="px-4 py-3">
-                                <div className="font-medium text-slate-900">
-                                    {person.first_name} {person.last_name}
-                                </div>
-                                <div className="text-xs text-slate-500">{person.email}</div>
-                            </td>
-                            <td className="px-4 py-3">
-                                <RoleBadge role={person.role} />
-                            </td>
-                            <td className="px-4 py-3">
-                                <StatusBadge status={person.status} />
-                            </td>
-                            {showsReportsTo && <td className="px-4 py-3 text-slate-600">{person.managerName}</td>}
+            {/* overflow-x-auto lets a wide table scroll horizontally on a
+                phone-width screen instead of clipping columns (NFR-8). */}
+            <div className="overflow-x-auto">
+                <table className="w-full text-left text-sm">
+                    <thead className="bg-slate-50 text-slate-500">
+                        <tr>
+                            <th className="px-4 py-2 font-medium">Person</th>
+                            <th className="px-4 py-2 font-medium">Role</th>
+                            <th className="px-4 py-2 font-medium">Status</th>
+                            {showsReportsTo && <th className="px-4 py-2 font-medium">Reports to</th>}
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {rows.map((person) => (
+                            <tr key={person.id} className="hover:bg-slate-50">
+                                <td className="px-4 py-3">
+                                    <div className="font-medium text-slate-900">
+                                        {person.first_name} {person.last_name}
+                                    </div>
+                                    <div className="text-xs text-slate-500">{person.email}</div>
+                                </td>
+                                <td className="px-4 py-3">
+                                    <RoleBadge role={person.role} />
+                                </td>
+                                <td className="px-4 py-3">
+                                    <StatusBadge status={person.status} />
+                                </td>
+                                {showsReportsTo && <td className="px-4 py-3 text-slate-600">{person.managerName}</td>}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </Card>
     );
 }

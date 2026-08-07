@@ -8,6 +8,12 @@ export const STATUS_BADGE_CLASSES = {
     ACTIVE: "bg-green-100 text-green-700",
     INVITED: "bg-amber-100 text-amber-700",
     INACTIVE: "bg-slate-100 text-slate-500",
+    // Leave request lifecycle states (Module 3).
+    SUBMITTED: "bg-amber-100 text-amber-700",
+    APPROVED: "bg-green-100 text-green-700",
+    REJECTED: "bg-red-100 text-red-700",
+    WITHDRAWN: "bg-slate-100 text-slate-500",
+    CANCELLED: "bg-slate-100 text-slate-500",
 };
 
 export const BADGE_BASE_CLASSES = "rounded-full px-2 py-0.5 text-xs font-medium";

@@ -1,10 +1,18 @@
 import { useAuth } from "../hooks/useAuth.js";
 import { ROLES } from "../constants/roles.js";
-import { Card } from "../components/ui/Card.jsx";
 import { RoleBadge } from "../components/ui/Badge.jsx";
+import { MyLeaveSummary } from "../components/dashboard/MyLeaveSummary.jsx";
+import { TeamOverviewSummary } from "../components/dashboard/TeamOverviewSummary.jsx";
+import { DelegationStatus } from "../components/dashboard/DelegationStatus.jsx";
 
 export function DashboardPage() {
-    const { user } = useAuth();
+    const { user, hasAnyRole } = useAuth();
+    // Team overview is meaningful for anyone who can see a team-scoped
+    // request list at all (leaveRequestService.listTeamLeaveRequests scopes
+    // it server-side); delegation status only applies to managers, since
+    // HR can't nominate a delegate.
+    const isManagerOrHr = hasAnyRole([ROLES.MANAGER, ROLES.HR_ADMIN]);
+    const isManager = hasAnyRole([ROLES.MANAGER]);
 
     return (
         <div>
@@ -13,17 +21,11 @@ export function DashboardPage() {
                 Role <RoleBadge role={user.role} />
             </p>
 
-            <Card className="mt-6 p-6">
-                {user.role === ROLES.EMPLOYEE && (
-                    <p className="text-sm text-slate-600">Your leave balance and requests will appear here.</p>
-                )}
-                {user.role === ROLES.MANAGER && (
-                    <p className="text-sm text-slate-600">Pending approvals for your team will appear here.</p>
-                )}
-                {user.role === ROLES.HR_ADMIN && (
-                    <p className="text-sm text-slate-600">Company-wide leave overview will appear here.</p>
-                )}
-            </Card>
+            <div className="mt-6 space-y-4">
+                {isManager && <DelegationStatus />}
+                {isManagerOrHr && <TeamOverviewSummary />}
+                <MyLeaveSummary />
+            </div>
         </div>
     );
 }

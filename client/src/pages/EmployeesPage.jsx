@@ -62,22 +62,26 @@ export function EmployeesPage() {
                 {loadError && <p role="alert" className="mt-2 text-sm text-red-600">{loadError}</p>}
                 {!loading && !loadError && (
                     <Card className="mt-4 overflow-hidden">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 text-slate-500">
-                                <tr>
-                                    <th className="px-4 py-2 font-medium">Employee</th>
-                                    <th className="px-4 py-2 font-medium">Role</th>
-                                    <th className="px-4 py-2 font-medium">Status</th>
-                                    <th className="px-4 py-2 font-medium">Manager</th>
-                                    <th className="px-4 py-2 font-medium">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {users.map((u) => (
-                                    <EmployeeTableRow key={u.id} user={u} users={users} onChanged={reload} />
-                                ))}
-                            </tbody>
-                        </table>
+                        {/* overflow-x-auto lets a wide table scroll horizontally on a
+                            phone-width screen instead of clipping columns (NFR-8). */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-50 text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-2 font-medium">Employee</th>
+                                        <th className="px-4 py-2 font-medium">Role</th>
+                                        <th className="px-4 py-2 font-medium">Status</th>
+                                        <th className="px-4 py-2 font-medium">Manager</th>
+                                        <th className="px-4 py-2 font-medium">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {users.map((u) => (
+                                        <EmployeeTableRow key={u.id} user={u} users={users} onChanged={reload} />
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </Card>
                 )}
             </section>

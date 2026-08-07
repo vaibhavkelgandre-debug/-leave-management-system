@@ -1,5 +1,5 @@
 import { NavLink } from "react-router-dom";
-import { CalendarCheck, IdCard, LayoutDashboard, Sun, Tag, Users } from "lucide-react";
+import { CalendarCheck, ClipboardCheck, IdCard, LayoutDashboard, Repeat, Sun, Tag, Users } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { ROLES } from "../../constants/roles.js";
 
@@ -37,6 +37,20 @@ const NAV_GROUPS = [
                 description: "Everyone who reports to you",
                 icon: Users,
                 roles: [ROLES.MANAGER, ROLES.HR_ADMIN],
+            },
+            {
+                to: "/dashboard/approvals",
+                label: "Approvals",
+                description: "Leave requests waiting on your decision",
+                icon: ClipboardCheck,
+                roles: [ROLES.MANAGER, ROLES.HR_ADMIN],
+            },
+            {
+                to: "/dashboard/delegations",
+                label: "Delegations",
+                description: "Who approves for you while you're away",
+                icon: Repeat,
+                roles: [ROLES.MANAGER],
             },
         ],
     },

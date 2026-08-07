@@ -10,6 +10,8 @@ import { EmployeesPage } from "./pages/EmployeesPage.jsx";
 import { MyBalancesPage } from "./pages/MyBalancesPage.jsx";
 import { LeaveTypesPage } from "./pages/LeaveTypesPage.jsx";
 import { HolidaysPage } from "./pages/HolidaysPage.jsx";
+import { ApprovalsPage } from "./pages/ApprovalsPage.jsx";
+import { DelegationsPage } from "./pages/DelegationsPage.jsx";
 import { NotFoundPage } from "./pages/NotFoundPage.jsx";
 import { ForbiddenPage } from "./pages/ForbiddenPage.jsx";
 import { AppLayout } from "./components/layout/AppLayout.jsx";
@@ -42,6 +44,11 @@ function App() {
 
                     <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} />}>
                         <Route path="team" element={<TeamPage />} />
+                        <Route path="approvals" element={<ApprovalsPage />} />
+                    </Route>
+
+                    <Route element={<RequireRole allowedRoles={[ROLES.MANAGER]} />}>
+                        <Route path="delegations" element={<DelegationsPage />} />
                     </Route>
 
                     <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN]} />}>

@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
-import { CalendarHeart } from "lucide-react";
+import { CalendarHeart, Plus } from "lucide-react";
 import { getMyBalances } from "../services/leaveBalanceService.js";
+import { getMyLeaveRequests } from "../services/leaveRequestService.js";
 import { Card } from "../components/ui/Card.jsx";
+import { Button } from "../components/ui/Button.jsx";
+import { Modal } from "../components/ui/Modal.jsx";
+import { RequestLeaveForm } from "../components/leave/RequestLeaveForm.jsx";
+import { MyLeaveRequestList } from "../components/leave/MyLeaveRequestList.jsx";
 
 const currentYear = new Date().getFullYear();
 // A short window around today is enough — there's no leave history before this
@@ -79,6 +84,18 @@ export function MyBalancesPage() {
     const [loadedYear, setLoadedYear] = useState(null);
     const [loadError, setLoadError] = useState(null);
 
+    const [myRequests, setMyRequests] = useState([]);
+    const [requestsLoaded, setRequestsLoaded] = useState(false);
+    const [requestsError, setRequestsError] = useState(null);
+
+    const [showRequestForm, setShowRequestForm] = useState(false);
+
+    // Bumped after a request is submitted/withdrawn/cancelled, to re-trigger
+    // both fetch effects — a request always changes both the balance and the
+    // request list, so they reload together.
+    const [reloadToken, setReloadToken] = useState(0);
+    const reload = () => setReloadToken((token) => token + 1);
+
     const loading = loadedYear !== year;
 
     useEffect(() => {
@@ -102,34 +119,69 @@ export function MyBalancesPage() {
         return () => {
             cancelled = true;
         };
-    }, [year]);
+    }, [year, reloadToken]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        getMyLeaveRequests()
+            .then((data) => {
+                if (cancelled) return;
+                setMyRequests(data);
+                setRequestsError(null);
+                setRequestsLoaded(true);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setRequestsError("Unable to load your leave requests");
+                setRequestsLoaded(true);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [reloadToken]);
+
+    function handleSubmitted() {
+        setShowRequestForm(false);
+        reload();
+    }
 
     return (
         <div>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-3">
                 <h1 className="text-2xl font-semibold text-slate-900">My Leave</h1>
-                <div className="flex items-center gap-2">
-                    <label htmlFor="year" className="text-sm font-medium text-slate-700">
-                        Year
-                    </label>
-                    <select
-                        id="year"
-                        value={year}
-                        onChange={(event) => setYear(Number(event.target.value))}
-                        className="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
-                    >
-                        {YEAR_OPTIONS.map((option) => (
-                            <option key={option} value={option}>
-                                {option}
-                            </option>
-                        ))}
-                    </select>
+                <div className="flex flex-wrap items-center gap-3">
+                    <div className="flex items-center gap-2">
+                        <label htmlFor="year" className="text-sm font-medium text-slate-700">
+                            Year
+                        </label>
+                        <select
+                            id="year"
+                            value={year}
+                            onChange={(event) => setYear(Number(event.target.value))}
+                            className="rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+                        >
+                            {YEAR_OPTIONS.map((option) => (
+                                <option key={option} value={option}>
+                                    {option}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    <Button icon={Plus} onClick={() => setShowRequestForm(true)}>
+                        Request Leave
+                    </Button>
                 </div>
             </div>
 
             <p className="mt-1 text-sm text-slate-500">
                 Your leave balance for each leave type. Days remaining is entitlement minus days taken and pending.
             </p>
+
+            <Modal open={showRequestForm} onClose={() => setShowRequestForm(false)} title="Request leave">
+                <RequestLeaveForm onSubmitted={handleSubmitted} />
+            </Modal>
 
             {loading && (
                 <p role="status" className="mt-6 text-sm text-slate-500">
@@ -155,6 +207,29 @@ export function MyBalancesPage() {
                     ))}
                 </div>
             )}
+
+            <section className="mt-8">
+                <h2 className="text-lg font-semibold text-slate-900">My requests</h2>
+
+                {!requestsLoaded && (
+                    <p role="status" className="mt-2 text-sm text-slate-500">
+                        Loading…
+                    </p>
+                )}
+                {requestsError && (
+                    <p role="alert" className="mt-2 text-sm text-red-600">
+                        {requestsError}
+                    </p>
+                )}
+                {requestsLoaded && !requestsError && myRequests.length === 0 && (
+                    <p className="mt-2 text-sm text-slate-500">You haven't submitted any leave requests yet.</p>
+                )}
+                {requestsLoaded && !requestsError && myRequests.length > 0 && (
+                    <div className="mt-4">
+                        <MyLeaveRequestList requests={myRequests} onChanged={reload} />
+                    </div>
+                )}
+            </section>
         </div>
     );
 }

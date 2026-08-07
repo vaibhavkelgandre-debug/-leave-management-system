@@ -34,6 +34,20 @@ export function formatDateRange(start, end) {
     return `${formatDateKey(start)} – ${formatDateKey(end)}`;
 }
 
+// Renders a full timestamp (e.g. audit log `created_at`) for display, e.g.
+// "26 Jan 2027, 14:05". Unlike the DATE-only helpers above, this is a real
+// instant with a time component, so `new Date(value)` is safe — there's no
+// midnight-in-UTC ambiguity to guard against.
+export function formatDateTime(value) {
+    return new Date(value).toLocaleString(undefined, {
+        day: "numeric",
+        month: "short",
+        year: "numeric",
+        hour: "2-digit",
+        minute: "2-digit",
+    });
+}
+
 // Today as a "YYYY-MM-DD" key, for comparing against API date strings.
 export function todayDateKey() {
     const now = new Date();

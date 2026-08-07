@@ -244,24 +244,29 @@ export function LeaveTypesPage() {
                 )}
                 {!loading && !loadError && leaveTypes.length > 0 && (
                     <Card className="mt-4 overflow-hidden">
-                        <table className="w-full text-left text-sm">
-                            <thead className="bg-slate-50 text-slate-500">
-                                <tr>
-                                    <th className="px-4 py-2 font-medium">Name</th>
-                                    <th className="px-4 py-2 font-medium">Entitlement</th>
-                                    <th className="px-4 py-2 font-medium">Accrual</th>
-                                    <th className="px-4 py-2 font-medium">Negative</th>
-                                    <th className="px-4 py-2 font-medium">Document</th>
-                                    <th className="px-4 py-2 font-medium">Status</th>
-                                    <th className="px-4 py-2 font-medium">Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-slate-100">
-                                {leaveTypes.map((leaveType) => (
-                                    <LeaveTypeRow key={leaveType.id} leaveType={leaveType} onChanged={reload} />
-                                ))}
-                            </tbody>
-                        </table>
+                        {/* overflow-x-auto lets this (the widest table in the app)
+                            scroll horizontally on a phone-width screen instead of
+                            clipping columns (NFR-8). */}
+                        <div className="overflow-x-auto">
+                            <table className="w-full text-left text-sm">
+                                <thead className="bg-slate-50 text-slate-500">
+                                    <tr>
+                                        <th className="px-4 py-2 font-medium">Name</th>
+                                        <th className="px-4 py-2 font-medium">Entitlement</th>
+                                        <th className="px-4 py-2 font-medium">Accrual</th>
+                                        <th className="px-4 py-2 font-medium">Negative</th>
+                                        <th className="px-4 py-2 font-medium">Document</th>
+                                        <th className="px-4 py-2 font-medium">Status</th>
+                                        <th className="px-4 py-2 font-medium">Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {leaveTypes.map((leaveType) => (
+                                        <LeaveTypeRow key={leaveType.id} leaveType={leaveType} onChanged={reload} />
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
                     </Card>
                 )}
             </section>

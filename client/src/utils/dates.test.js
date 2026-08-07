@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toDateKey, formatDateKey, addDaysToDateKey, formatDateRange, eachDateKeyInRange } from "./dates.js";
+import { toDateKey, formatDateKey, addDaysToDateKey, formatDateRange, eachDateKeyInRange, formatDateTime } from "./dates.js";
 
 describe("toDateKey", () => {
     it("zero-pads month and day", () => {
@@ -74,5 +74,13 @@ describe("eachDateKeyInRange", () => {
             "2027-11-01",
             "2027-11-02",
         ]);
+    });
+});
+
+describe("formatDateTime", () => {
+    it("includes both the date and the time", () => {
+        const result = formatDateTime("2027-01-26T14:05:00Z");
+        expect(result).toMatch(/2027/);
+        expect(result).toMatch(/\d{1,2}:\d{2}/);
     });
 });
