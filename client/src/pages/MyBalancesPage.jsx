@@ -1,36 +1,73 @@
 import { useEffect, useState } from "react";
+import { CalendarHeart } from "lucide-react";
 import { getMyBalances } from "../services/leaveBalanceService.js";
+import { Card } from "../components/ui/Card.jsx";
 
 const currentYear = new Date().getFullYear();
 // A short window around today is enough — there's no leave history before this
 // system existed, and balances aren't projected far into the future.
 const YEAR_OPTIONS = [currentYear - 1, currentYear, currentYear + 1];
 
-function BalanceCard({ balance }) {
+// Cycled by card position so a row of different leave types reads as a set of
+// distinct little cards rather than identical grey boxes.
+const ACCENTS = [
+    { bg: "bg-indigo-100", text: "text-indigo-600", bar: "bg-indigo-500" },
+    { bg: "bg-emerald-100", text: "text-emerald-600", bar: "bg-emerald-500" },
+    { bg: "bg-amber-100", text: "text-amber-600", bar: "bg-amber-500" },
+    { bg: "bg-rose-100", text: "text-rose-600", bar: "bg-rose-500" },
+    { bg: "bg-sky-100", text: "text-sky-600", bar: "bg-sky-500" },
+    { bg: "bg-violet-100", text: "text-violet-600", bar: "bg-violet-500" },
+];
+
+function balanceMessage(remaining, entitlement) {
+    if (entitlement === 0) return "No entitlement set for this leave type.";
+    if (remaining <= 0) return "You're all out for now — plan around this one.";
+    if (remaining <= entitlement * 0.25) return "Running low — worth planning ahead.";
+    return "Looking healthy — plenty left to plan around.";
+}
+
+function BalanceCard({ balance, accent }) {
     const remaining = Number(balance.days_remaining);
+    const entitlement = Number(balance.entitlement);
+    const taken = Number(balance.days_taken);
+    const pending = Number(balance.days_pending);
+    const usedPercent = entitlement > 0 ? Math.min(100, Math.round(((taken + pending) / entitlement) * 100)) : 0;
 
     return (
-        <div className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-            <h3 className="text-sm font-medium text-slate-500">{balance.leave_type_name}</h3>
-            <p className="mt-2 text-3xl font-semibold text-slate-900">
-                {remaining}
-                <span className="ml-1 text-base font-normal text-slate-500">days left</span>
-            </p>
-            <dl className="mt-4 space-y-1 text-sm">
-                <div className="flex justify-between">
-                    <dt className="text-slate-500">Entitlement</dt>
-                    <dd className="font-medium text-slate-700">{Number(balance.entitlement)}</dd>
+        <Card className="p-5 transition hover:shadow-md">
+            <div className="flex items-start justify-between gap-3">
+                <div>
+                    <h3 className="text-sm font-medium text-slate-500">{balance.leave_type_name}</h3>
+                    <p className="mt-2 text-3xl font-semibold text-slate-900">
+                        {remaining}
+                        <span className="ml-1 text-base font-normal text-slate-500">days left</span>
+                    </p>
                 </div>
-                <div className="flex justify-between">
-                    <dt className="text-slate-500">Taken</dt>
-                    <dd className="font-medium text-slate-700">{Number(balance.days_taken)}</dd>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${accent.bg}`}>
+                    <CalendarHeart className={`h-5 w-5 ${accent.text}`} aria-hidden="true" />
+                </span>
+            </div>
+
+            <div className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-slate-100">
+                <div className={`h-full rounded-full ${accent.bar} transition-all`} style={{ width: `${usedPercent}%` }} />
+            </div>
+            <p className="mt-2 text-xs text-slate-500">{balanceMessage(remaining, entitlement)}</p>
+
+            <dl className="mt-4 grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg bg-slate-50 py-2">
+                    <dt className="text-[11px] text-slate-500">Entitlement</dt>
+                    <dd className="mt-0.5 text-sm font-semibold text-slate-900">{entitlement}</dd>
                 </div>
-                <div className="flex justify-between">
-                    <dt className="text-slate-500">Pending</dt>
-                    <dd className="font-medium text-slate-700">{Number(balance.days_pending)}</dd>
+                <div className="rounded-lg bg-slate-50 py-2">
+                    <dt className="text-[11px] text-slate-500">Taken</dt>
+                    <dd className="mt-0.5 text-sm font-semibold text-slate-900">{taken}</dd>
+                </div>
+                <div className="rounded-lg bg-slate-50 py-2">
+                    <dt className="text-[11px] text-slate-500">Pending</dt>
+                    <dd className="mt-0.5 text-sm font-semibold text-slate-900">{pending}</dd>
                 </div>
             </dl>
-        </div>
+        </Card>
     );
 }
 
@@ -113,8 +150,8 @@ export function MyBalancesPage() {
 
             {!loading && !loadError && balances.length > 0 && (
                 <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {balances.map((balance) => (
-                        <BalanceCard key={balance.id} balance={balance} />
+                    {balances.map((balance, index) => (
+                        <BalanceCard key={balance.id} balance={balance} accent={ACCENTS[index % ACCENTS.length]} />
                     ))}
                 </div>
             )}

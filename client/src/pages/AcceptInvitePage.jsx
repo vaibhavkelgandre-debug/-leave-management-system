@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
+import { Mail } from "lucide-react";
 import { useAuth } from "../hooks/useAuth.js";
 import * as authService from "../services/authService.js";
+import { Card } from "../components/ui/Card.jsx";
+import { Button } from "../components/ui/Button.jsx";
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -15,6 +18,7 @@ export function AcceptInvitePage() {
     const [invitation, setInvitation] = useState(null);
     const [verifyError, setVerifyError] = useState(null);
     const [password, setPassword] = useState("");
+    const [confirmPassword, setConfirmPassword] = useState("");
     const [submitError, setSubmitError] = useState(null);
     const [submitting, setSubmitting] = useState(false);
 
@@ -30,6 +34,10 @@ export function AcceptInvitePage() {
 
         if (password.length < 8) {
             setSubmitError("Password must be at least 8 characters");
+            return;
+        }
+        if (password !== confirmPassword) {
+            setSubmitError("Passwords do not match");
             return;
         }
 
@@ -49,13 +57,13 @@ export function AcceptInvitePage() {
 
     if (verifyError) {
         return (
-            <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-                <div className="w-full max-w-sm rounded-lg border border-red-200 bg-white p-8 text-center shadow-sm">
+            <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-indigo-50/40 px-4">
+                <Card className="w-full max-w-sm border-red-200 p-8 text-center">
                     <h1 className="text-xl font-semibold text-slate-900">Invitation invalid</h1>
                     <p role="alert" className="mt-2 text-sm text-red-600">
                         {verifyError}
                     </p>
-                </div>
+                </Card>
             </div>
         );
     }
@@ -68,15 +76,22 @@ export function AcceptInvitePage() {
         );
     }
 
-    return (
-        <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-            <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
-                <h1 className="text-xl font-semibold text-slate-900">Welcome, {invitation.first_name}</h1>
-                <p className="mt-1 text-sm text-slate-500">
-                    Set a password for {invitation.email} to activate your account.
-                </p>
+    const initial = invitation.first_name?.[0]?.toUpperCase();
 
-                <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4">
+    return (
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-indigo-50/40 px-4">
+            <Card className="w-full max-w-sm p-8 text-center">
+                <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-gradient-to-br from-indigo-600 to-violet-600 text-lg font-semibold text-white shadow-sm">
+                    {initial}
+                </span>
+                <h1 className="mt-4 text-xl font-semibold text-slate-900">Welcome, {invitation.first_name}</h1>
+                <p className="mt-1 flex items-center justify-center gap-1.5 text-sm text-slate-500">
+                    <Mail className="h-4 w-4 shrink-0" aria-hidden="true" />
+                    {invitation.email}
+                </p>
+                <p className="mt-3 text-sm text-slate-500">Set a password to activate your account.</p>
+
+                <form onSubmit={handleSubmit} noValidate className="mt-6 space-y-4 text-left">
                     {submitError && (
                         <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
                             {submitError}
@@ -97,15 +112,25 @@ export function AcceptInvitePage() {
                         />
                     </div>
 
-                    <button
-                        type="submit"
-                        disabled={submitting}
-                        className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                    >
-                        {submitting ? "Activating…" : "Activate account"}
-                    </button>
+                    <div>
+                        <label htmlFor="confirm-password" className={labelClasses}>
+                            Confirm password
+                        </label>
+                        <input
+                            id="confirm-password"
+                            type="password"
+                            autoComplete="new-password"
+                            value={confirmPassword}
+                            onChange={(event) => setConfirmPassword(event.target.value)}
+                            className={inputClasses}
+                        />
+                    </div>
+
+                    <Button type="submit" loading={submitting} className="w-full">
+                        Activate account
+                    </Button>
                 </form>
-            </div>
+            </Card>
         </div>
     );
 }

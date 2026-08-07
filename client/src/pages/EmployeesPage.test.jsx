@@ -31,17 +31,18 @@ describe("EmployeesPage", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load employees");
     });
 
-    it("links to the invite page instead of showing an inline form", async () => {
+    it("opens the invite form in a modal instead of navigating away", async () => {
         userService.getUsers.mockResolvedValue([]);
         renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
         await screen.findByText("Employees");
 
-        // The form now lives on its own route, so none of its fields render here.
+        // Closed by default — nothing from the invite form renders yet.
         expect(screen.queryByLabelText(/first name/i)).not.toBeInTheDocument();
-        expect(screen.getByRole("link", { name: /add employee/i })).toHaveAttribute(
-            "href",
-            "/dashboard/employees/new"
-        );
+
+        await userEvent.click(screen.getByRole("button", { name: /add employee/i }));
+
+        expect(await screen.findByRole("dialog", { name: /invite an employee/i })).toBeInTheDocument();
+        expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
     });
 
     it("lets HR change an employee's manager", async () => {

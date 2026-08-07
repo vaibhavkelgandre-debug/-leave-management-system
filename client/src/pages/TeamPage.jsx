@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { getMyTeam } from "../services/userService.js";
 import { useAuth } from "../hooks/useAuth.js";
-import { ROLE_BADGE_CLASSES, STATUS_BADGE_CLASSES, BADGE_BASE_CLASSES } from "../constants/badges.js";
+import { Card } from "../components/ui/Card.jsx";
+import { RoleBadge, StatusBadge } from "../components/ui/Badge.jsx";
 
 function TeamTable({ rows, showsReportsTo }) {
     return (
-        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <Card className="overflow-hidden">
             <table className="w-full text-left text-sm">
                 <thead className="bg-slate-50 text-slate-500">
                     <tr>
@@ -25,23 +26,17 @@ function TeamTable({ rows, showsReportsTo }) {
                                 <div className="text-xs text-slate-500">{person.email}</div>
                             </td>
                             <td className="px-4 py-3">
-                                <span className={`${BADGE_BASE_CLASSES} ${ROLE_BADGE_CLASSES[person.role] || "bg-slate-100 text-slate-700"}`}>
-                                    {person.role}
-                                </span>
+                                <RoleBadge role={person.role} />
                             </td>
                             <td className="px-4 py-3">
-                                <span
-                                    className={`${BADGE_BASE_CLASSES} ${STATUS_BADGE_CLASSES[person.status] || "bg-slate-100 text-slate-500"}`}
-                                >
-                                    {person.status}
-                                </span>
+                                <StatusBadge status={person.status} />
                             </td>
                             {showsReportsTo && <td className="px-4 py-3 text-slate-600">{person.managerName}</td>}
                         </tr>
                     ))}
                 </tbody>
             </table>
-        </div>
+        </Card>
     );
 }
 

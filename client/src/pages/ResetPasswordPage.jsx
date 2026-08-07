@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import * as authService from "../services/authService.js";
+import { Card } from "../components/ui/Card.jsx";
+import { Button } from "../components/ui/Button.jsx";
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -39,8 +41,8 @@ export function ResetPasswordPage() {
     }
 
     return (
-        <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
-            <div className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
+        <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-slate-50 to-indigo-50/40 px-4">
+            <Card className="w-full max-w-sm p-8">
                 <h1 className="text-xl font-semibold text-slate-900">Set a new password</h1>
 
                 {success ? (
@@ -89,16 +91,12 @@ export function ResetPasswordPage() {
                             />
                         </div>
 
-                        <button
-                            type="submit"
-                            disabled={submitting}
-                            className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                        >
-                            {submitting ? "Resetting…" : "Reset password"}
-                        </button>
+                        <Button type="submit" loading={submitting} className="w-full">
+                            Reset password
+                        </Button>
                     </form>
                 )}
-            </div>
+            </Card>
         </div>
     );
 }

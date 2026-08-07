@@ -1,7 +1,12 @@
 import { useEffect, useState } from "react";
+import { Plus } from "lucide-react";
 import { getLeaveTypes, createLeaveType, updateLeaveTypeStatus } from "../services/leaveTypeService.js";
 import { toErrorMessage } from "../services/httpError.js";
-import { BADGE_BASE_CLASSES } from "../constants/badges.js";
+import { Button } from "../components/ui/Button.jsx";
+import { Card } from "../components/ui/Card.jsx";
+import { Modal } from "../components/ui/Modal.jsx";
+import { PageHeader } from "../components/ui/PageHeader.jsx";
+import { StatusBadge } from "../components/ui/Badge.jsx";
 
 const emptyForm = {
     name: "",
@@ -47,23 +52,12 @@ function LeaveTypeRow({ leaveType, onChanged }) {
             <td className="px-4 py-3 text-slate-600">{leaveType.allow_negative_balance ? "Yes" : "No"}</td>
             <td className="px-4 py-3 text-slate-600">{leaveType.requires_document ? "Yes" : "No"}</td>
             <td className="px-4 py-3">
-                <span
-                    className={`${BADGE_BASE_CLASSES} ${
-                        leaveType.is_active ? "bg-green-100 text-green-700" : "bg-slate-100 text-slate-500"
-                    }`}
-                >
-                    {leaveType.is_active ? "ACTIVE" : "INACTIVE"}
-                </span>
+                <StatusBadge status={leaveType.is_active ? "ACTIVE" : "INACTIVE"} />
             </td>
             <td className="px-4 py-3">
-                <button
-                    type="button"
-                    onClick={handleToggleStatus}
-                    disabled={busy}
-                    className="text-sm font-medium text-indigo-600 transition hover:text-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
+                <Button variant="ghost" size="sm" loading={busy} onClick={handleToggleStatus}>
                     {leaveType.is_active ? "Deactivate" : "Activate"}
-                </button>
+                </Button>
             </td>
         </tr>
     );
@@ -140,123 +134,99 @@ export function LeaveTypesPage() {
 
     return (
         <div>
-            <div className="flex items-center justify-between">
-                <h1 className="text-2xl font-semibold text-slate-900">Leave Types</h1>
-                {!showForm && (
-                    <button
-                        type="button"
-                        onClick={() => setShowForm(true)}
-                        className="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700"
-                    >
-                        + Add Leave Type
-                    </button>
-                )}
-            </div>
+            <PageHeader
+                title="Leave Types"
+                description="Creating a leave type immediately gives every active employee a balance for it."
+                action={
+                    <Button icon={Plus} onClick={() => setShowForm(true)}>
+                        Add Leave Type
+                    </Button>
+                }
+            />
 
-            <p className="mt-1 text-sm text-slate-500">
-                Creating a leave type immediately gives every active employee a balance for it.
-            </p>
+            <Modal open={showForm} onClose={handleCancel} title="New leave type">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                    {formError && (
+                        <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+                            {formError}
+                        </p>
+                    )}
 
-            {showForm && (
-                <section className="mt-6 max-w-md rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
-                    <div className="flex items-center justify-between">
-                        <h2 className="text-lg font-semibold text-slate-900">New leave type</h2>
-                        <button
-                            type="button"
-                            onClick={handleCancel}
-                            className="text-sm font-medium text-slate-500 hover:text-slate-700"
-                        >
-                            Cancel
-                        </button>
+                    <div>
+                        <label htmlFor="name" className={labelClasses}>
+                            Name
+                        </label>
+                        <input
+                            id="name"
+                            name="name"
+                            value={form.name}
+                            onChange={handleChange}
+                            required
+                            className={inputClasses}
+                        />
                     </div>
 
-                    <form onSubmit={handleSubmit} className="mt-4 space-y-4">
-                        {formError && (
-                            <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                                {formError}
-                            </p>
-                        )}
-
-                        <div>
-                            <label htmlFor="name" className={labelClasses}>
-                                Name
-                            </label>
-                            <input
-                                id="name"
-                                name="name"
-                                value={form.name}
-                                onChange={handleChange}
-                                required
-                                className={inputClasses}
-                            />
-                        </div>
-
-                        <div>
-                            <label htmlFor="annualEntitlement" className={labelClasses}>
-                                Annual entitlement (days)
-                            </label>
-                            <input
-                                id="annualEntitlement"
-                                name="annualEntitlement"
-                                type="number"
-                                min="0"
-                                step="0.5"
-                                value={form.annualEntitlement}
-                                onChange={handleChange}
-                                required
-                                className={inputClasses}
-                            />
-                            <p className="mt-1 text-xs text-slate-500">Must be in increments of 0.5 for half-days.</p>
-                        </div>
-
-                        <div>
-                            <label htmlFor="accrualType" className={labelClasses}>
-                                Accrual
-                            </label>
-                            <select
-                                id="accrualType"
-                                name="accrualType"
-                                value={form.accrualType}
-                                onChange={handleChange}
-                                className={inputClasses}
-                            >
-                                <option value="UPFRONT">Upfront</option>
-                                <option value="MONTHLY">Monthly</option>
-                            </select>
-                        </div>
-
-                        <label className="flex items-center gap-2 text-sm text-slate-700">
-                            <input
-                                name="allowNegativeBalance"
-                                type="checkbox"
-                                checked={form.allowNegativeBalance}
-                                onChange={handleChange}
-                                className="rounded border-slate-300"
-                            />
-                            Allow negative balance
+                    <div>
+                        <label htmlFor="annualEntitlement" className={labelClasses}>
+                            Annual entitlement (days)
                         </label>
+                        <input
+                            id="annualEntitlement"
+                            name="annualEntitlement"
+                            type="number"
+                            min="0"
+                            step="0.5"
+                            value={form.annualEntitlement}
+                            onChange={handleChange}
+                            required
+                            className={inputClasses}
+                        />
+                        <p className="mt-1 text-xs text-slate-500">Must be in increments of 0.5 for half-days.</p>
+                    </div>
 
-                        <label className="flex items-center gap-2 text-sm text-slate-700">
-                            <input
-                                name="requiresDocument"
-                                type="checkbox"
-                                checked={form.requiresDocument}
-                                onChange={handleChange}
-                                className="rounded border-slate-300"
-                            />
-                            Supporting document required
+                    <div>
+                        <label htmlFor="accrualType" className={labelClasses}>
+                            Accrual
                         </label>
-
-                        <button
-                            type="submit"
-                            disabled={submitting}
-                            className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        <select
+                            id="accrualType"
+                            name="accrualType"
+                            value={form.accrualType}
+                            onChange={handleChange}
+                            className={inputClasses}
                         >
-                            {submitting ? "Creating…" : "Create"}
-                        </button>
-                    </form>
-                </section>
-            )}
+                            <option value="UPFRONT">Upfront</option>
+                            <option value="MONTHLY">Monthly</option>
+                        </select>
+                    </div>
+
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                            name="allowNegativeBalance"
+                            type="checkbox"
+                            checked={form.allowNegativeBalance}
+                            onChange={handleChange}
+                            className="rounded border-slate-300"
+                        />
+                        Allow negative balance
+                    </label>
+
+                    <label className="flex items-center gap-2 text-sm text-slate-700">
+                        <input
+                            name="requiresDocument"
+                            type="checkbox"
+                            checked={form.requiresDocument}
+                            onChange={handleChange}
+                            className="rounded border-slate-300"
+                        />
+                        Supporting document required
+                    </label>
+
+                    <Button type="submit" loading={submitting} className="w-full">
+                        Create
+                    </Button>
+                </form>
+            </Modal>
 
             <section className="mt-8">
                 {loading && (
@@ -273,7 +243,7 @@ export function LeaveTypesPage() {
                     <p className="mt-2 text-sm text-slate-500">No leave types yet. Add one to get started.</p>
                 )}
                 {!loading && !loadError && leaveTypes.length > 0 && (
-                    <div className="mt-4 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+                    <Card className="mt-4 overflow-hidden">
                         <table className="w-full text-left text-sm">
                             <thead className="bg-slate-50 text-slate-500">
                                 <tr>
@@ -288,15 +258,11 @@ export function LeaveTypesPage() {
                             </thead>
                             <tbody className="divide-y divide-slate-100">
                                 {leaveTypes.map((leaveType) => (
-                                    <LeaveTypeRow
-                                        key={leaveType.id}
-                                        leaveType={leaveType}
-                                        onChanged={reload}
-                                    />
+                                    <LeaveTypeRow key={leaveType.id} leaveType={leaveType} onChanged={reload} />
                                 ))}
                             </tbody>
                         </table>
-                    </div>
+                    </Card>
                 )}
             </section>
         </div>

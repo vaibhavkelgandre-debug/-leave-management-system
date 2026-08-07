@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth.js";
 import { validateLoginForm } from "../../utils/validation.js";
 import { GoogleLoginButton } from "./GoogleLoginButton.jsx";
+import { Button } from "../ui/Button.jsx";
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -119,13 +120,9 @@ export function LoginForm() {
                     )}
                 </div>
 
-                <button
-                    type="submit"
-                    disabled={submitting}
-                    className="w-full rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                    {submitting ? "Signing in…" : "Sign in"}
-                </button>
+                <Button type="submit" loading={submitting} className="w-full">
+                    Sign in
+                </Button>
             </form>
 
             <div className="flex items-center gap-3">
