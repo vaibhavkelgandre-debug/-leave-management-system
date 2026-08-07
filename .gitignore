@@ -3,3 +3,7 @@ node_modules
 .env
 .env.test
 .env.*.local
+
+# Per-machine Claude Code settings — can contain local secrets in permission
+# rules (e.g. a PGPASSWORD embedded in an allowed Bash command).
+.claude/settings.local.json

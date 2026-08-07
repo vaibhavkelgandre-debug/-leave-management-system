@@ -6,6 +6,7 @@ An HR platform for managing employee accounts, roles, leave types/balances, and 
 - **Frontend setup** → [`client/README.md`](client/README.md)
 - **Functional requirements & progress** → [`docs/1.functional_requirements.md`](docs/1.functional_requirements.md)
 - **API reference** → [`docs/2.api_documentation.md`](docs/2.api_documentation.md)
+- **Database schema** → [`docs/db.md`](docs/db.md)
 
 ## Quick start
 
