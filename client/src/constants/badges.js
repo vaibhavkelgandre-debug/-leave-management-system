@@ -11,3 +11,9 @@ export const STATUS_BADGE_CLASSES = {
 };
 
 export const BADGE_BASE_CLASSES = "rounded-full px-2 py-0.5 text-xs font-medium";
+
+export const ROLE_LABELS = {
+    HR_ADMIN: "HR",
+    MANAGER: "Manager",
+    EMPLOYEE: "Employee",
+};
