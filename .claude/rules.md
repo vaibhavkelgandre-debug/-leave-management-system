@@ -13,6 +13,85 @@
 
 ---
 
+## 🛡️ Non-Functional Requirements — Non-Negotiable, Applies to Every Module
+
+> From the project brief, reproduced **verbatim, unedited**. These are cross-cutting — they apply to every module past, present and future, not a per-feature checklist. Full status tracking and analysis: [`docs/4.non_functional_requirements.md`](../docs/4.non_functional_requirements.md) — keep that file updated as each item moves toward being satisfied.
+
+1. Authorization is checked on every request, against the specific record being touched. "Is this user logged in" is not enough; the question is always "is this user allowed to do this, to this row". Write it once in a place you can reason about rather than scattering checks through every handler.
+2. A balance must never drift. The number an employee sees has to agree with the history that produced it, after any sequence of approvals, cancellations and overrides. Consider whether a balance is something you store and mutate, or something you derive from a ledger of entries.
+3. State transitions are enforced server-side. The set of legal moves from each state should be visible in one place in the code, not implied by scattered conditionals.
+4. Every write endpoint validates its input server-side. Never trust the client.
+5. The API returns meaningful HTTP status codes and machine-readable error responses. A refused action returns a distinguishable error — "not allowed" and "not found" are different answers, and you should decide deliberately which one an outsider gets.
+6. Code must be commented. Every file opens with a short comment saying what it is for, every exported function has a description of its inputs, output and failure modes, and every non-obvious piece of logic — the permission rules, the working-day calculation, the balance arithmetic, the delegation window — carries a comment explaining why it works that way. Comments that merely restate the code are noise; we will call those out too.
+7. The app stays responsive with 200 employees and three years of requests.
+8. Usable on a phone-width screen. It does not need to be beautiful; it needs to be clear.
+9. No secrets, keys or passwords committed to the repository.
+
+> ⚠️ **Rule #6 overrides the general "don't write comments unless the why is non-obvious" instinct — for this project specifically, write the file-header comment and the per-function input/output/failure-mode comment every time**, even when it feels repetitive. Applies to every new or changed file from now on. Retrofitting existing files that predate this rule is a tracked backlog item (see the doc above), not something to do silently inside an unrelated change.
+
+---
+
+## 📝 Module 3 — Requests and the Approval Workflow (Authoritative Spec)
+
+> From the project brief, reproduced **verbatim, unedited**. This is the spec for Module 3 (FR-011 through FR-021 in [`docs/1.functional_requirements.md`](../docs/1.functional_requirements.md)) — read this section before writing any leave-request code instead of re-deriving the rules from scratch.
+
+1. An employee submits a request with a leave type, a start and end date, half-day flags, and a reason.
+2. Document upload is required where the leave type demands it — for example a medical certificate for sick leave. File type and size are validated on the server; never trust the file extension or the client-reported size. A document is visible only to the requester, their approver and HR.
+3. Before submitting, the employee sees exactly how many working days the request will consume, with weekends and public holidays already excluded.
+4. A request is refused if it would take the balance below zero, unless that leave type permits a negative balance.
+5. A request is refused if it overlaps a request the same employee already has pending or approved.
+6. A request moves through the states submitted, approved, rejected, withdrawn and cancelled. Illegal transitions are rejected by the server — an already-cancelled request cannot be approved.
+7. A manager approves or rejects a request from their team, leaving a comment. HR can act on any request and can override a manager's decision, which is recorded as an override.
+8. An employee can withdraw a request that is still pending, and can cancel an approved request whose dates are still in the future. Both return the days to the balance.
+9. Delegation is required. A manager who is going away nominates a delegate for a date range. During that window the delegate can approve requests on the manager's behalf, and the record shows both who acted and who they acted for.
+10. Every request carries a full audit trail: each state change with the actor, the timestamp, and any comment. The trail is append-only and never edited.
+
+> 🧭 **Status: built** (migrations 013–016, minus file upload — point 2 — which is explicitly deferred pending a storage decision). Implementation notes, for anyone touching this code next:
+> - Point 3's live preview is `POST /api/leave-requests/preview` — pure, side-effect-free, used by both the frontend's `RequestLeaveForm.jsx` and the real `POST /api/leave-requests` internally, so the number an employee sees before submitting is always exactly what gets charged.
+> - Point 6/7's state machine is `leaveRequestStateMachine.js` — `WITHDRAWN`/`CANCELLED` are dead ends (never appear as a `from`); `APPROVED ↔ REJECTED` stays legal only via the two `HR_OVERRIDE_*` actions, gated by `requireRole("HR_ADMIN")` at the route level.
+> - Balances are ledger-derived (`leave_balance_ledger`, summed at read time) — see NFR-2 above. `leave_balances.days_taken`/`days_pending` were dropped as columns entirely (migration 014).
+> - The two open decisions are settled as: requests spanning a year boundary debit the **start date's** year; only the employee themselves can withdraw/cancel (no HR/manager force-cancel).
+> - **One simplification beyond what was originally discussed:** the 403-vs-404 policy (NFR-5) treats "a delegate whose window has expired" the same as "never was a delegate" — both return `404`, not a `403` for the expired case. Distinguishing them would need an extra "did a delegation ever exist for this pair" query for no real security benefit (the action is blocked either way) — don't add that distinction without a concrete reason to.
+> - **React gotcha hit while building the live preview:** don't call `setState` synchronously inside a `useEffect` body to "reset" state when preconditions aren't met (e.g. clearing a preview when the date range becomes invalid) — `eslint-plugin-react-hooks`'s `set-state-in-effect` rule flags it, and it's right to: it causes an extra render on every keystroke. Instead, compute a derived boolean (e.g. `hasPreviewableRange`) and gate the *rendering* of the stale value on it, rather than nulling the state out imperatively. See `RequestLeaveForm.jsx`.
+
+---
+
+## 🎯 Deliverables & Review Criteria (Most Important — read before every module)
+
+> From the project brief, reproduced **verbatim, unedited**. This is what the project is actually judged on — re-read this section before considering any module "done."
+
+### 7. Deliverables
+
+1. Git repository with a readable commit history — small, meaningful commits, not one commit called "final".
+2. A deployed, working URL. Frontend, backend, database and file storage all live. Seed it with a reporting structure at least three levels deep, two leave types, a holiday calendar, and one demo login per role — employee, manager and HR — so a reviewer can log in as each and see the difference immediately.
+3. Unit tests. At minimum, cover the working-day calculation across weekends, public holidays and half days; the balance after an approval, a cancellation and an override; overlap detection; rejection of illegal state transitions; and authorization — that a manager cannot act on a request outside their team, that an employee cannot approve their own request, and that a delegate's authority stops when their window ends. Any runner is fine. Tests must run and pass from a single documented command.
+4. README covering what the app does, how to run it locally, required environment variables, the architecture and data model, how you modelled permissions and where they are enforced, how balances are calculated, how to run the tests, the significant decisions you made and why, and the known limitations.
+5. API documentation. Every endpoint with method, path, the roles allowed to call it, request body, response shape and error cases. A section of the README, a Swagger/OpenAPI page, or a published Postman collection all count.
+
+### 10. How this will be reviewed
+
+1. Correctness and consistency of authorization. Every endpoint, every record, enforced on the server. This matters most, and we will probe it directly.
+2. Correctness of the balance and working-day arithmetic after long sequences of actions.
+3. Quality of the unit tests — particularly whether you tested the permission rules, not only the happy path.
+4. Whether the permission model and the state machine live somewhere a reader can find them, rather than being spread across handlers.
+5. API design: clear resources, correct verbs and status codes.
+6. Data model: does it handle the reporting tree, delegation and the audit trail without special-casing?
+7. Code readability and comments: naming, structure, no dead code, and explanations where a reader would otherwise have to guess.
+8. Documentation quality — a reviewer should get it running from your README alone.
+9. Scope discipline: everything in section 4 done well beats extra features done loosely.
+
+**Not assessed: visual flair, animation, or the use of any particular library.**
+
+> 🧭 **What this means in practice, going forward:**
+> - **Visual polish is now explicitly off the priority list.** All of this session's UI redesign work stands, but no further time should go into further "make it pretty" passes at the expense of Module 3 correctness/tests/docs — review criterion 9 (scope discipline) explicitly rewards *not* doing that.
+> - Deliverable #5 (API docs) is already substantially satisfied by [`docs/2.api_documentation.md`](../docs/2.api_documentation.md) — keep it current (existing standing rule) rather than starting a separate Swagger/Postman effort.
+> - Deliverable #3's test list is a **checklist to verify against literally**, not a vibe: working-day calc (weekends + holidays + half-days), balance after approve/cancel/override, overlap detection, illegal-transition rejection, and three specific authorization tests by name — manager acting outside their team, an employee approving their own request, and a delegate acting after their window has ended. Don't consider Module 3's test suite done until all of these exist explicitly, not just implied by broader tests.
+> - Deliverable #2 (seed data: 3-level reporting tree, 2 leave types, holiday calendar, one demo login per role) needs a seed script — not yet built, add it as part of Module 3's own deliverables, not an afterthought at the very end.
+> - Deliverable #4 wants one README that a reviewer can run the whole app from unaided — currently this project's setup/architecture/decisions are spread across `README.md`, `server/README.md`, `client/README.md`, and `docs/*.md`. That's fine as long as the root `README.md` clearly indexes all of it (which it currently does) — revisit before final submission to make sure nothing a reviewer needs is missing from that chain.
+> - Review criterion 4 (permission model and state machine must "live somewhere a reader can find") directly validates the design from the Module 3 spec above: one `assertCanActOnLeaveRequest`-style function and one explicit state-transition map, not logic scattered across controllers.
+
+---
+
 ## 🛠️ Technology Stack
 
 | Layer    | Stack |
@@ -68,7 +147,7 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 - Every table needs `created_at` and `updated_at`.
 - Store SQL scripts in `src/sql`.
 - Migrations are numbered sequentially and **never edited after being applied**.
-  Current latest is `012_add_holiday_date_range.sql` → next migration must start at `013_...`.
+  Current latest is `016_create_audit_logs.sql` → next migration must start at `017_...`.
 
 > ℹ️ **Holidays store a date range, not a single date.** `holidays` has `start_date`/`end_date` (both `NOT NULL`, `end_date >= start_date`), not a single `holiday_date` — this supports multi-day holidays (e.g. a 5-day Diwali). The API accepts `endDate` as optional and defaults it to `startDate` for single-day holidays. There's no DB-level uniqueness on dates anymore (ranges make exact-duplicate uniqueness meaningless); overlap between holidays is instead checked at the service layer (`holidayService.js` → `findOverlappingHoliday`) and rejected with a `409`, same status code as the old DB-constraint-driven duplicate check.
 
@@ -155,7 +234,7 @@ Each feature's documentation should cover:
 - Edge Cases
 - Test Cases
 
-> 🚨 **Database schema doc:** [`docs/db.md`](../docs/db.md) documents every table (ER diagram + column-level breakdown) and a "Planned tables" section for what's designed but not built yet. **Whenever a migration is added or changed under `server/src/sql/`, update `docs/db.md` in the same change** — this is the same standing rule as keeping `docs/2.api_documentation.md` in sync with endpoint changes.
+> 🚨 **Database schema doc:** [`docs/3.db.md`](../docs/3.db.md) documents every table (ER diagram + column-level breakdown) and a "Planned tables" section for what's designed but not built yet. **Whenever a migration is added or changed under `server/src/sql/`, update `docs/3.db.md` in the same change** — this is the same standing rule as keeping `docs/2.api_documentation.md` in sync with endpoint changes.
 
 ---
 
@@ -166,7 +245,7 @@ Before writing new markup for a button, badge, card, modal, or page header, chec
 | Component | Path | Purpose | Key props |
 |---|---|---|---|
 | `Button` | `ui/Button.jsx` | Every clickable action (submit, primary/secondary/danger/ghost actions). Supports rendering as a router `Link` via `as`. | `variant` (`primary\|secondary\|danger\|ghost`), `size` (`sm\|md`), `icon`, `iconPosition`, `loading`, `as` |
-| `IconButton` | `ui/IconButton.jsx` | Icon-only actions, e.g. row-level delete. Always requires an accessible `label`. | `icon`, `label`, `variant` (`default\|danger\|ghost`), `size`, `loading` |
+| `IconButton` | `ui/IconButton.jsx` | Icon-only actions, e.g. row-level delete/approve. Always requires an accessible `label`. | `icon`, `label`, `variant` (`default\|primary\|success\|danger\|ghost`), `size`, `loading` |
 | `Badge`, `RoleBadge`, `StatusBadge` | `ui/Badge.jsx` | Pills for roles/status. `RoleBadge` renders the short label from `ROLE_LABELS` (`HR_ADMIN`→"HR" etc.) instead of the raw enum. | `RoleBadge({ role })`, `StatusBadge({ status })` |
 | `Card` | `ui/Card.jsx` | White bordered container (table wrappers, form panels, tiles). No default padding — pass it via `className`. | `className` |
 | `Modal` | `ui/Modal.jsx` | The only modal/dialog pattern in the app — portal + backdrop + Escape/click-outside close. Use for any "add/edit X" form instead of an inline toggled section. | `open`, `onClose`, `title` |
@@ -174,12 +253,23 @@ Before writing new markup for a button, badge, card, modal, or page header, chec
 | `InviteEmployeeForm` | `team/InviteEmployeeForm.jsx` | The employee-invite form (fields + invite-link result with a copy-to-clipboard button). Feature-specific, not a generic primitive, but it's meant to be dropped into a `Modal` rather than given its own route — `EmployeesPage` is the only place that opens it. Takes an `onInvited` callback to refresh the caller's list. | `onInvited` |
 | `HolidayForm` | `calendar/HolidayForm.jsx` | Add **and** edit form for a holiday, designed to sit in a `Modal`. Pass `holiday` to edit (prefills, calls `PATCH`) or omit it to create (calls `POST`). Handles the start/end range, the day-count preview, and the overlap error from the server. Give it a `key` of the holiday id so switching rows remounts it with fresh state. | `holiday`, `onSaved(startDate)` |
 | `HolidayList` | `calendar/HolidayList.jsx` | The holiday list — calendar-tear date chips, day-count and "Passed" badges, and per-row edit/delete icon buttons (owns its own delete call and error state). | `holidays`, `canManage`, `onEdit`, `onChanged` |
+| `RequestLeaveForm` | `leave/RequestLeaveForm.jsx` | Submit-a-leave-request form, meant for a `Modal`. Live-previews the working-day count via `POST /leave-requests/preview` as the date range/half-day flags change. | `onSubmitted(createdRequest)` |
+| `MyLeaveRequestList` | `leave/MyLeaveRequestList.jsx` | An employee's own request history — card list with a withdraw action while `SUBMITTED` and a cancel action while `APPROVED` and still in the future. | `requests`, `onChanged` |
+| `TeamRequestList` | `leave/TeamRequestList.jsx` | The manager/HR approvals list — approve/reject on `SUBMITTED` rows (reject expands an inline optional-comment box), plus an HR-only override control on already-decided rows. | `requests`, `canOverride`, `onChanged` |
+| `DelegationForm` | `leave/DelegationForm.jsx` | Nominate-a-delegate form for a `Modal`. Delegate options come from the existing role-scoped `getUsers()` call, filtered to exclude the current user. | `onCreated(delegation)` |
+| `DelegationList` | `leave/DelegationList.jsx` | A manager's own nominated delegations — read-only card list (no revoke endpoint exists). | `delegations` |
+| `MyLeaveSummary` | `dashboard/MyLeaveSummary.jsx` | Dashboard tile: the current user's own leave at a glance (balances, pending count, next upcoming leave, most recent decision). Shown to every role — self-contained, fetches its own data. | none |
+| `TeamOverviewSummary` | `dashboard/TeamOverviewSummary.jsx` | Dashboard tile: pending-approvals count + review link, who's on approved leave today, team headcount. Shown to `MANAGER`/`HR_ADMIN` — relies on `getTeamLeaveRequests()` already being scoped server-side, so it doesn't need to know which of the two roles is viewing it. | none |
+| `DelegationStatus` | `dashboard/DelegationStatus.jsx` | Dashboard tile, `MANAGER`-only: renders **nothing** unless the manager currently has an active delegate covering approvals today. | none |
+| `AuditTrail` | `leave/AuditTrail.jsx` | The "View history" modal shown from `MyLeaveRequestList`/`TeamRequestList` — timestamped list of every state change on a request, with actor/delegate names resolved server-side (FR-021). Fetches lazily on open. | `requestId`, `open`, `onClose` |
 
 Icons come from `lucide-react` (added for this redesign) — reuse an existing import from a nearby file before picking a new icon name.
 
 `ROLE_LABELS` (short display labels for roles) lives in `client/src/constants/badges.js` alongside `ROLE_BADGE_CLASSES`/`STATUS_BADGE_CLASSES`/`BADGE_BASE_CLASSES`.
 
 > ⚠️ **Modal gotcha (already fixed, don't reintroduce):** `Modal`'s focus-on-open effect must depend on `open` only, **not** `onClose`. The caller's `onClose` is typically a plain function defined in the page body (not `useCallback`), so it gets a new identity on every render — including every keystroke in a form inside the modal. If the focus effect depends on it, focus gets yanked back to the modal panel after every character, forcing the user to re-click the input for each letter. Keep the Escape-key listener effect (which can safely depend on `onClose`) separate from the focus-on-mount effect (which must not).
+
+> ⚠️ **Another `set-state-in-effect` shape (already fixed, don't reintroduce):** when an effect kicks off an async fetch keyed by a prop (e.g. `AuditTrail`'s `requestId`), don't reset state to `null` synchronously at the top of the effect before calling the fetch — that's still a synchronous `setState` inside the effect body and trips the same `eslint-plugin-react-hooks` rule as the `RequestLeaveForm` case above. Instead, store the fetched result *keyed by the id it was fetched for* (e.g. `{ requestId, entries, error }`) and derive "is this stale/loading" by comparing the stored key to the current prop — the reset happens implicitly because a mismatched key means "not current," with no imperative nulling needed. See `AuditTrail.jsx`.
 
 ---
 
