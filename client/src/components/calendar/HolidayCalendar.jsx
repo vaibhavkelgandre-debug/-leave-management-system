@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
+import { eachDateKeyInRange, formatDateRange } from "../../utils/dates.js";
 
 // Indigo to match the rest of the app's primary color, applied as FullCalendar
 // event colors rather than global CSS so it doesn't bleed into other pages.
@@ -51,16 +52,25 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
         }
     }, [focusDate]);
 
-    const events = holidays.map((holiday) => ({
-        id: holiday.id,
-        title: holiday.name,
-        start: holiday.holiday_date,
-        allDay: true,
-        display: "list-item",
-        backgroundColor: HOLIDAY_COLOR,
-        borderColor: HOLIDAY_COLOR,
-        textColor: "#ffffff",
-    }));
+    // A multi-day holiday becomes one single-day event per date rather than a
+    // single event with an `end`: FullCalendar renders a spanning `list-item`
+    // event as just one dot on its start day, so a range would otherwise show
+    // nothing on the days that follow.
+    const events = holidays.flatMap((holiday) => {
+        const rangeLabel = formatDateRange(holiday.start_date, holiday.end_date);
+
+        return eachDateKeyInRange(holiday.start_date, holiday.end_date).map((dateKey) => ({
+            id: `${holiday.id}-${dateKey}`,
+            title: holiday.name,
+            start: dateKey,
+            allDay: true,
+            display: "list-item",
+            backgroundColor: HOLIDAY_COLOR,
+            borderColor: HOLIDAY_COLOR,
+            textColor: "#ffffff",
+            extendedProps: { rangeLabel },
+        }));
+    });
 
     function handleDatesSet(info) {
         // `currentStart` is the first date belonging to the visible month (not
@@ -73,10 +83,14 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
     }
 
     function handleEventDidMount(info) {
-        // Native browser tooltip on hover — the holiday's name is the only
-        // "description" the data model has, and this needs no extra UI.
-        info.el.title = info.event.title;
-        info.el.setAttribute("aria-label", info.event.title);
+        // Native browser tooltip on hover. For a multi-day holiday this also
+        // surfaces the full range, since a single day cell's dot otherwise
+        // gives no hint the holiday continues beyond it.
+        const { title } = info.event;
+        const { rangeLabel } = info.event.extendedProps;
+        const label = rangeLabel.includes("–") ? `${title} (${rangeLabel})` : title;
+        info.el.title = label;
+        info.el.setAttribute("aria-label", label);
     }
 
     return (
@@ -99,7 +113,7 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: HOLIDAY_COLOR }} />
-                    Holiday — hover the dot for its name
+                    Holiday — hover the dot for its name and dates
                 </span>
                 <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded border border-slate-200 bg-slate-50" />

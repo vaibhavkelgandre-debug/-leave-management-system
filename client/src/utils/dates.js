@@ -17,3 +17,50 @@ export function formatDateKey(value) {
         year: "numeric",
     });
 }
+
+// Adds (or subtracts) whole days to a "YYYY-MM-DD" key using local date
+// parts, same UTC-avoidance as the rest of this file — letting the Date
+// constructor normalize an out-of-range day handles month/year rollover.
+export function addDaysToDateKey(value, days) {
+    const [year, month, day] = value.split("-").map(Number);
+    const shifted = new Date(year, month - 1, day + days);
+    return toDateKey(shifted.getFullYear(), shifted.getMonth(), shifted.getDate());
+}
+
+// Renders a single-day date, or a "start – end" range when the holiday spans
+// more than one day.
+export function formatDateRange(start, end) {
+    if (!end || start === end) return formatDateKey(start);
+    return `${formatDateKey(start)} – ${formatDateKey(end)}`;
+}
+
+// Today as a "YYYY-MM-DD" key, for comparing against API date strings.
+export function todayDateKey() {
+    const now = new Date();
+    return toDateKey(now.getFullYear(), now.getMonth(), now.getDate());
+}
+
+// Splits a "YYYY-MM-DD" key into the parts a compact date chip needs.
+export function toDateParts(value) {
+    const [year, month, day] = value.split("-").map(Number);
+    return {
+        year,
+        month,
+        day,
+        monthShort: new Date(year, month - 1, day).toLocaleDateString(undefined, { month: "short" }),
+    };
+}
+
+// Every "YYYY-MM-DD" key from start to end inclusive. Plain string comparison
+// is safe here because the format is always zero-padded, so it sorts
+// chronologically. An end before the start yields just the start day.
+export function eachDateKeyInRange(start, end) {
+    const last = end && end >= start ? end : start;
+    const keys = [];
+
+    for (let cursor = start; cursor <= last; cursor = addDaysToDateKey(cursor, 1)) {
+        keys.push(cursor);
+    }
+
+    return keys;
+}

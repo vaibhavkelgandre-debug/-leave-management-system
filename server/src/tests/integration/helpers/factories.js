@@ -49,9 +49,6 @@ export async function createLeaveType({
     return insertLeaveType({ name, annualEntitlement, accrualType, allowNegativeBalance, requiresDocument });
 }
 
-export async function createHoliday({
-    name = "Test Holiday",
-    holidayDate = "2026-01-01",
-} = {}) {
-    return insertHoliday({ name, holidayDate });
+export async function createHoliday({ name = "Test Holiday", startDate = "2026-01-01", endDate } = {}) {
+    return insertHoliday({ name, startDate, endDate: endDate || startDate });
 }

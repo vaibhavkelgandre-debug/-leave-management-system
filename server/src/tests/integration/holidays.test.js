@@ -14,12 +14,13 @@ describe("Holidays", () => {
         const hr = await createRootHr({ email: "hr-holidays-crud@example.com" });
         const agent = await loginAs(hr);
 
-        const created = await agent.post("/api/holidays").send({ name: "New Year", holidayDate: "2027-01-01" });
+        const created = await agent.post("/api/holidays").send({ name: "New Year", startDate: "2027-01-01" });
         expect(created.statusCode).toBe(201);
+        expect(created.body.data.end_date).toBe("2027-01-01");
 
         const updated = await agent
             .patch(`/api/holidays/${created.body.data.id}`)
-            .send({ name: "New Year's Day", holidayDate: "2027-01-01" });
+            .send({ name: "New Year's Day", startDate: "2027-01-01" });
         expect(updated.statusCode).toBe(200);
         expect(updated.body.data.name).toBe("New Year's Day");
 
@@ -30,33 +31,60 @@ describe("Holidays", () => {
         expect(list.body.data.find((h) => h.id === created.body.data.id)).toBeUndefined();
     });
 
+    it("creates a multi-day holiday spanning a date range", async () => {
+        const hr = await createRootHr({ email: "hr-holidays-range@example.com" });
+        const agent = await loginAs(hr);
+
+        const created = await agent
+            .post("/api/holidays")
+            .send({ name: "Diwali", startDate: "2027-10-16", endDate: "2027-10-20" });
+
+        expect(created.statusCode).toBe(201);
+        expect(created.body.data.start_date).toBe("2027-10-16");
+        expect(created.body.data.end_date).toBe("2027-10-20");
+    });
+
     it("rejects writes from a non-HR caller", async () => {
         const employee = await createUser({ role: "EMPLOYEE", email: "emp-holidays-write@example.com" });
         const agent = await loginAs(employee);
 
-        const response = await agent.post("/api/holidays").send({ name: "Fake Holiday", holidayDate: "2027-05-01" });
+        const response = await agent.post("/api/holidays").send({ name: "Fake Holiday", startDate: "2027-05-01" });
         expect(response.statusCode).toBe(403);
     });
 
-    it("rejects a duplicate holiday date", async () => {
-        const hr = await createRootHr({ email: "hr-holidays-dup@example.com" });
+    it("rejects a holiday whose range overlaps an existing one", async () => {
+        const hr = await createRootHr({ email: "hr-holidays-overlap@example.com" });
         const agent = await loginAs(hr);
 
-        await createHoliday({ name: "Independence Day", holidayDate: "2027-08-15" });
-        const response = await agent.post("/api/holidays").send({ name: "Another Name", holidayDate: "2027-08-15" });
+        await createHoliday({ name: "Independence Day", startDate: "2027-08-15" });
+        const exactDuplicate = await agent
+            .post("/api/holidays")
+            .send({ name: "Another Name", startDate: "2027-08-15" });
+        expect(exactDuplicate.statusCode).toBe(409);
 
-        expect(response.statusCode).toBe(409);
+        await createHoliday({ name: "Diwali", startDate: "2027-10-16", endDate: "2027-10-20" });
+        const overlappingRange = await agent
+            .post("/api/holidays")
+            .send({ name: "Overlaps Diwali", startDate: "2027-10-18", endDate: "2027-10-22" });
+        expect(overlappingRange.statusCode).toBe(409);
     });
 
-    it("filters by year", async () => {
+    it("filters by year, including a range that spans a year boundary", async () => {
         const hr = await createRootHr({ email: "hr-holidays-filter@example.com" });
         const agent = await loginAs(hr);
 
-        await createHoliday({ name: "2026 Holiday", holidayDate: "2026-12-25" });
-        await createHoliday({ name: "2027 Holiday", holidayDate: "2027-12-25" });
+        await createHoliday({ name: "2026 Holiday", startDate: "2026-12-25" });
+        await createHoliday({ name: "2027 Holiday", startDate: "2027-12-25" });
+        await createHoliday({ name: "Year Boundary", startDate: "2028-12-30", endDate: "2029-01-02" });
 
-        const response = await agent.get("/api/holidays?year=2026");
-        expect(response.body.data).toHaveLength(1);
-        expect(response.body.data[0].name).toBe("2026 Holiday");
+        const response2026 = await agent.get("/api/holidays?year=2026");
+        expect(response2026.body.data).toHaveLength(1);
+        expect(response2026.body.data[0].name).toBe("2026 Holiday");
+
+        const response2028 = await agent.get("/api/holidays?year=2028");
+        expect(response2028.body.data.map((h) => h.name)).toContain("Year Boundary");
+
+        const response2029 = await agent.get("/api/holidays?year=2029");
+        expect(response2029.body.data.map((h) => h.name)).toContain("Year Boundary");
     });
 });

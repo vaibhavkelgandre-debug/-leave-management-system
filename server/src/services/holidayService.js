@@ -2,13 +2,20 @@ import {
     insertHoliday,
     findAllHolidays,
     findHolidayById,
+    findOverlappingHoliday,
     updateHoliday as updateHolidayRepo,
     deleteHoliday as deleteHolidayRepo,
 } from "../repositories/holidayRepository.js";
-import { notFound } from "../utils/appError.js";
+import { conflict, notFound } from "../utils/appError.js";
 
-export async function createHoliday(payload) {
-    return insertHoliday(payload);
+export async function createHoliday({ name, startDate, endDate }) {
+    const resolvedEndDate = endDate || startDate;
+
+    if (await findOverlappingHoliday({ startDate, endDate: resolvedEndDate })) {
+        throw conflict("A holiday already covers one or more of these dates");
+    }
+
+    return insertHoliday({ name, startDate, endDate: resolvedEndDate });
 }
 
 export async function listHolidays(year) {
@@ -23,9 +30,15 @@ export async function getHolidayById(id) {
     return holiday;
 }
 
-export async function updateHoliday(id, payload) {
+export async function updateHoliday(id, { name, startDate, endDate }) {
     await getHolidayById(id);
-    const updated = await updateHolidayRepo(id, payload);
+    const resolvedEndDate = endDate || startDate;
+
+    if (await findOverlappingHoliday({ startDate, endDate: resolvedEndDate, excludeId: id })) {
+        throw conflict("A holiday already covers one or more of these dates");
+    }
+
+    const updated = await updateHolidayRepo(id, { name, startDate, endDate: resolvedEndDate });
     if (!updated) {
         throw notFound("Holiday not found");
     }
