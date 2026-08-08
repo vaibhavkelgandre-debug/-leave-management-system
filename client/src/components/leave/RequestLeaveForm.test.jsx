@@ -78,14 +78,17 @@ describe("RequestLeaveForm", () => {
         await userEvent.type(screen.getByLabelText(/reason/i), "Family trip");
         await userEvent.click(screen.getByRole("button", { name: /submit request/i }));
 
-        expect(leaveRequestService.submitLeaveRequest).toHaveBeenCalledWith({
-            leaveTypeId: "lt-1",
-            startDate: "2027-01-04",
-            endDate: "2027-01-05",
-            startHalfDay: false,
-            endHalfDay: false,
-            reason: "Family trip",
-        });
+        expect(leaveRequestService.submitLeaveRequest).toHaveBeenCalledWith(
+            {
+                leaveTypeId: "lt-1",
+                startDate: "2027-01-04",
+                endDate: "2027-01-05",
+                startHalfDay: false,
+                endHalfDay: false,
+                reason: "Family trip",
+            },
+            null
+        );
         expect(onSubmitted).toHaveBeenCalledWith(created);
     });
 

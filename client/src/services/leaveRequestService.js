@@ -5,14 +5,36 @@ export async function previewLeaveRequest({ startDate, endDate, startHalfDay, en
     return unwrap(response);
 }
 
-export async function submitLeaveRequest({ leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, reason }) {
-    const response = await apiClient.post("/leave-requests", {
-        leaveTypeId,
-        startDate,
-        endDate,
-        startHalfDay,
-        endHalfDay,
-        reason,
+// `document` is an optional File (from an <input type="file">). When present,
+// the request is sent as multipart/form-data instead of JSON so the server
+// can read the attached file (FR-012). The Content-Type override is
+// necessary: apiClient defaults every request to "application/json", and
+// without clearing it here the browser can't attach its own multipart
+// boundary, which leaves the server unable to parse the body at all.
+export async function submitLeaveRequest({ leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, reason }, document) {
+    if (!document) {
+        const response = await apiClient.post("/leave-requests", {
+            leaveTypeId,
+            startDate,
+            endDate,
+            startHalfDay,
+            endHalfDay,
+            reason,
+        });
+        return unwrap(response);
+    }
+
+    const formData = new FormData();
+    formData.append("leaveTypeId", leaveTypeId);
+    formData.append("startDate", startDate);
+    formData.append("endDate", endDate);
+    formData.append("startHalfDay", startHalfDay);
+    formData.append("endHalfDay", endHalfDay);
+    formData.append("reason", reason);
+    formData.append("document", document);
+
+    const response = await apiClient.post("/leave-requests", formData, {
+        headers: { "Content-Type": undefined },
     });
     return unwrap(response);
 }
@@ -29,6 +51,14 @@ export async function getTeamLeaveRequests() {
 
 export async function getLeaveRequestAuditTrail(id) {
     const response = await apiClient.get(`/leave-requests/${id}/audit`);
+    return unwrap(response);
+}
+
+// Returns `{ url, filename, mimeType }` — `url` is a Cloudinary signed link
+// valid for a few minutes (FR-012), so callers should open/use it right away
+// rather than caching it for later.
+export async function getLeaveRequestDocument(id) {
+    const response = await apiClient.get(`/leave-requests/${id}/document`);
     return unwrap(response);
 }
 

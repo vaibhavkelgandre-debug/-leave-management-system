@@ -29,6 +29,7 @@ const labelClasses = "mb-1 block text-sm font-medium text-slate-700";
 export function RequestLeaveForm({ onSubmitted }) {
     const [leaveTypes, setLeaveTypes] = useState(null);
     const [form, setForm] = useState(emptyForm);
+    const [documentFile, setDocumentFile] = useState(null); // named to avoid shadowing the global `document`
     const [previewDays, setPreviewDays] = useState(null);
     const [previewError, setPreviewError] = useState(null);
     const [formError, setFormError] = useState(null);
@@ -88,17 +89,25 @@ export function RequestLeaveForm({ onSubmitted }) {
         };
     }, [hasPreviewableRange, form.startDate, form.endDate, form.startHalfDay, form.endHalfDay]);
 
+    const selectedLeaveType = (leaveTypes ?? []).find((leaveType) => leaveType.id === form.leaveTypeId);
+    const requiresDocument = Boolean(selectedLeaveType?.requires_document);
+
     function handleChange(event) {
         const { name, value, type, checked } = event.target;
         setForm((prev) => ({ ...prev, [name]: type === "checkbox" ? checked : value }));
     }
 
+    function handleDocumentChange(event) {
+        setDocumentFile(event.target.files[0] ?? null);
+    }
+
     async function handleSubmit(event) {
         event.preventDefault();
 
-        // Mirrors the server's own two checks (leaveRequestValidator.js) so
-        // the common mistakes are caught before a round-trip, not because
-        // the server can't be trusted to catch them too — it always does.
+        // Mirrors the server's own checks (leaveRequestValidator.js /
+        // leaveRequestService.js) so the common mistakes are caught before a
+        // round-trip, not because the server can't be trusted to catch them
+        // too — it always does.
         if (form.endDate < form.startDate) {
             setFormError("End date can't be before the start date.");
             return;
@@ -107,12 +116,16 @@ export function RequestLeaveForm({ onSubmitted }) {
             setFormError("A single-day request can only have one half-day flag set.");
             return;
         }
+        if (requiresDocument && !documentFile) {
+            setFormError(`A document is required for ${selectedLeaveType.name} requests.`);
+            return;
+        }
 
         setSubmitting(true);
         setFormError(null);
 
         try {
-            const created = await submitLeaveRequest(form);
+            const created = await submitLeaveRequest(form, documentFile);
             onSubmitted(created);
         } catch (err) {
             setFormError(toErrorMessage(err, "Unable to submit leave request"));
@@ -151,6 +164,28 @@ export function RequestLeaveForm({ onSubmitted }) {
                     ))}
                 </select>
             </div>
+
+            {selectedLeaveType && (
+                <div>
+                    <label htmlFor="document" className={labelClasses}>
+                        Document{requiresDocument ? "" : " (optional)"}
+                    </label>
+                    <input
+                        id="document"
+                        name="document"
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png"
+                        onChange={handleDocumentChange}
+                        required={requiresDocument}
+                        className={`${inputClasses} file:mr-3 file:rounded file:border-0 file:bg-slate-100 file:px-3 file:py-1.5 file:text-sm file:font-medium`}
+                    />
+                    <p className="mt-1 text-xs text-slate-500">
+                        {requiresDocument
+                            ? `${selectedLeaveType.name} requires a supporting document (PDF, JPG or PNG, max 5MB).`
+                            : "PDF, JPG or PNG, max 5MB."}
+                    </p>
+                </div>
+            )}
 
             <div className="grid grid-cols-2 gap-3">
                 <div>
