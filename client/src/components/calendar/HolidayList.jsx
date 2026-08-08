@@ -48,6 +48,7 @@ function HolidayItem({ holiday, canManage, onEdit, onChanged }) {
             onChanged();
         } catch (err) {
             setError(toErrorMessage(err, "Unable to delete holiday"));
+        } finally {
             setBusy(false);
         }
     }
