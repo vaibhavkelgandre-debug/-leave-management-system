@@ -4,6 +4,7 @@ const VARIANT_CLASSES = {
     primary:
         "bg-gradient-to-r from-indigo-600 to-violet-600 text-white shadow-sm hover:from-indigo-500 hover:to-violet-500",
     secondary: "border border-slate-300 bg-white text-slate-700 shadow-sm hover:bg-slate-50",
+    success: "bg-emerald-50 text-emerald-700 shadow-sm ring-1 ring-inset ring-emerald-200 hover:bg-emerald-100",
     danger: "bg-red-50 text-red-700 shadow-sm ring-1 ring-inset ring-red-200 hover:bg-red-100",
     ghost: "text-slate-600 hover:bg-slate-100 hover:text-slate-900",
 };

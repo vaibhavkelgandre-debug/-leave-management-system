@@ -3,16 +3,16 @@
 // owns its own withdraw/cancel mutation state, same convention as every
 // other row-level action in this app.
 import { useState } from "react";
-import { Ban, History, X } from "lucide-react";
+import { Ban, Info, X } from "lucide-react";
 import { withdrawLeaveRequest, cancelLeaveRequest } from "../../services/leaveRequestService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { Card } from "../ui/Card.jsx";
-import { IconButton } from "../ui/IconButton.jsx";
+import { Button } from "../ui/Button.jsx";
 import { StatusBadge } from "../ui/Badge.jsx";
-import { AuditTrail } from "./AuditTrail.jsx";
+import { RequestDetailModal } from "./RequestDetailModal.jsx";
 import { formatDateRange, todayDateKey } from "../../utils/dates.js";
 
-function RequestItem({ request, onChanged, onViewHistory }) {
+function RequestItem({ request, onChanged, onViewDetails }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
@@ -23,6 +23,10 @@ function RequestItem({ request, onChanged, onViewHistory }) {
     const canCancel = request.status === "APPROVED" && request.start_date > todayDateKey();
     const workingDays = Number(request.working_days);
 
+    // `setBusy(false)` must run on both paths, not just `catch` — see the
+    // identical fix/comment on TeamRequestList.jsx's `runAction`. Without it,
+    // a successful withdraw/cancel left the row's icon spinning forever
+    // instead of clearing once `onChanged()`'s refetch lands.
     async function handleWithdraw() {
         setBusy(true);
         setError(null);
@@ -31,6 +35,7 @@ function RequestItem({ request, onChanged, onViewHistory }) {
             onChanged();
         } catch (err) {
             setError(toErrorMessage(err, "Unable to withdraw request"));
+        } finally {
             setBusy(false);
         }
     }
@@ -43,60 +48,56 @@ function RequestItem({ request, onChanged, onViewHistory }) {
             onChanged();
         } catch (err) {
             setError(toErrorMessage(err, "Unable to cancel request"));
+        } finally {
             setBusy(false);
         }
     }
 
     return (
-        <li className="flex items-center gap-4 px-4 py-3 transition hover:bg-slate-50/80">
-            <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-2">
-                    <span className="font-semibold text-slate-900">{request.leave_type_name}</span>
-                    <StatusBadge status={request.status} />
-                </div>
-                <p className="mt-0.5 text-xs text-slate-500">
-                    {formatDateRange(request.start_date, request.end_date)} · {workingDays} day{workingDays === 1 ? "" : "s"}
-                </p>
-                {request.reason && <p className="mt-1 text-xs text-slate-500">{request.reason}</p>}
-                {request.decision_comment && (
-                    <p className="mt-1 text-xs text-slate-500 italic">“{request.decision_comment}”</p>
-                )}
-                {error && (
-                    <p role="alert" className="mt-1 text-xs text-red-600">
-                        {error}
+        <li className="px-4 py-3 transition hover:bg-slate-50/80">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-semibold text-slate-900">{request.leave_type_name}</span>
+                        <StatusBadge status={request.status} />
+                    </div>
+                    <p className="mt-0.5 text-xs text-slate-500">
+                        {formatDateRange(request.start_date, request.end_date)} · {workingDays} day
+                        {workingDays === 1 ? "" : "s"}
                     </p>
-                )}
-            </div>
+                    {request.reason && <p className="mt-1 text-xs text-slate-500">{request.reason}</p>}
+                    {request.decision_comment && (
+                        <p className="mt-1 text-xs text-slate-500 italic">“{request.decision_comment}”</p>
+                    )}
+                    {error && (
+                        <p role="alert" className="mt-1 text-xs text-red-600">
+                            {error}
+                        </p>
+                    )}
+                </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-                {canWithdraw && (
-                    <IconButton
-                        icon={X}
-                        label="Withdraw request"
-                        variant="ghost"
-                        size="sm"
-                        loading={busy}
-                        onClick={handleWithdraw}
-                    />
-                )}
-                {canCancel && (
-                    <IconButton
-                        icon={Ban}
-                        label="Cancel request"
-                        variant="danger"
-                        size="sm"
-                        loading={busy}
-                        onClick={handleCancel}
-                    />
-                )}
-                <IconButton icon={History} label="View history" size="sm" onClick={() => onViewHistory(request.id)} />
+                <div className="flex flex-wrap items-center gap-2">
+                    {canWithdraw && (
+                        <Button icon={X} variant="secondary" size="sm" loading={busy} onClick={handleWithdraw}>
+                            Withdraw
+                        </Button>
+                    )}
+                    {canCancel && (
+                        <Button icon={Ban} variant="danger" size="sm" loading={busy} onClick={handleCancel}>
+                            Cancel
+                        </Button>
+                    )}
+                    <Button icon={Info} variant="secondary" size="sm" onClick={() => onViewDetails(request)}>
+                        Details
+                    </Button>
+                </div>
             </div>
         </li>
     );
 }
 
 export function MyLeaveRequestList({ requests, onChanged }) {
-    const [historyRequestId, setHistoryRequestId] = useState(null);
+    const [detailRequest, setDetailRequest] = useState(null);
 
     return (
         <Card className="overflow-hidden">
@@ -106,14 +107,14 @@ export function MyLeaveRequestList({ requests, onChanged }) {
                         key={request.id}
                         request={request}
                         onChanged={onChanged}
-                        onViewHistory={setHistoryRequestId}
+                        onViewDetails={setDetailRequest}
                     />
                 ))}
             </ul>
-            <AuditTrail
-                requestId={historyRequestId}
-                open={historyRequestId !== null}
-                onClose={() => setHistoryRequestId(null)}
+            <RequestDetailModal
+                request={detailRequest}
+                open={detailRequest !== null}
+                onClose={() => setDetailRequest(null)}
             />
         </Card>
     );

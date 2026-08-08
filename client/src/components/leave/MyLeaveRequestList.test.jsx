@@ -28,8 +28,8 @@ describe("MyLeaveRequestList", () => {
 
     it("offers a withdraw action for a pending request", () => {
         renderWithProviders(<MyLeaveRequestList requests={[makeRequest()]} onChanged={vi.fn()} />);
-        expect(screen.getByRole("button", { name: /withdraw request/i })).toBeInTheDocument();
-        expect(screen.queryByRole("button", { name: /cancel request/i })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^withdraw$/i })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /^cancel$/i })).not.toBeInTheDocument();
     });
 
     it("offers a cancel action for a future approved request, but not a past one", () => {
@@ -37,13 +37,13 @@ describe("MyLeaveRequestList", () => {
         const past = makeRequest({ id: "req-past", status: "APPROVED", start_date: "2000-01-06" });
         renderWithProviders(<MyLeaveRequestList requests={[future, past]} onChanged={vi.fn()} />);
 
-        expect(screen.getAllByRole("button", { name: /cancel request/i })).toHaveLength(1);
+        expect(screen.getAllByRole("button", { name: /^cancel$/i })).toHaveLength(1);
     });
 
     it("shows no actions for a request that's already withdrawn, rejected or cancelled", () => {
         renderWithProviders(<MyLeaveRequestList requests={[makeRequest({ status: "WITHDRAWN" })]} onChanged={vi.fn()} />);
-        expect(screen.queryByRole("button", { name: /withdraw|cancel request/i })).not.toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /view history/i })).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /^withdraw$|^cancel$/i })).not.toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^details$/i })).toBeInTheDocument();
     });
 
     it("shows the manager's comment when one was left", () => {
@@ -61,7 +61,7 @@ describe("MyLeaveRequestList", () => {
         const onChanged = vi.fn();
         renderWithProviders(<MyLeaveRequestList requests={[makeRequest()]} onChanged={onChanged} />);
 
-        await userEvent.click(screen.getByRole("button", { name: /withdraw request/i }));
+        await userEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
 
         expect(leaveRequestService.withdrawLeaveRequest).toHaveBeenCalledWith("req-1");
         expect(onChanged).toHaveBeenCalled();
@@ -73,12 +73,12 @@ describe("MyLeaveRequestList", () => {
         });
         renderWithProviders(<MyLeaveRequestList requests={[makeRequest()]} onChanged={vi.fn()} />);
 
-        await userEvent.click(screen.getByRole("button", { name: /withdraw request/i }));
+        await userEvent.click(screen.getByRole("button", { name: /^withdraw$/i }));
 
         expect(await screen.findByRole("alert")).toHaveTextContent(/cannot withdraw a decided request/i);
     });
 
-    it("opens the audit trail modal and loads history when View history is clicked", async () => {
+    it("opens the details modal and loads history when Details is clicked", async () => {
         leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([
             {
                 id: "a1",
@@ -92,7 +92,7 @@ describe("MyLeaveRequestList", () => {
         ]);
         renderWithProviders(<MyLeaveRequestList requests={[makeRequest()]} onChanged={vi.fn()} />);
 
-        await userEvent.click(screen.getByRole("button", { name: /view history/i }));
+        await userEvent.click(screen.getByRole("button", { name: /^details$/i }));
 
         expect(leaveRequestService.getLeaveRequestAuditTrail).toHaveBeenCalledWith("req-1");
         expect(await screen.findByText("Asha Employee")).toBeInTheDocument();

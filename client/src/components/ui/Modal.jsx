@@ -3,7 +3,15 @@ import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { IconButton } from "./IconButton.jsx";
 
-export function Modal({ open, onClose, title, children }) {
+// "md" (the original, unchanged width) fits every existing form-style modal;
+// "lg" is for content-heavy views (e.g. RequestDetailModal) that need room
+// for an embedded document alongside the rest of the request's details.
+const SIZE_CLASSES = {
+    md: "max-w-md",
+    lg: "max-w-2xl",
+};
+
+export function Modal({ open, onClose, title, size = "md", children }) {
     const panelRef = useRef(null);
 
     // Deliberately only depends on `open`, not `onClose` — the caller's onClose
@@ -42,7 +50,7 @@ export function Modal({ open, onClose, title, children }) {
                     aria-modal="true"
                     aria-labelledby="modal-title"
                     tabIndex={-1}
-                    className="relative z-10 flex max-h-[85vh] w-full max-w-md animate-[scale-in_150ms_ease-out] flex-col rounded-xl bg-white shadow-xl outline-none"
+                    className={`relative z-10 flex max-h-[85vh] w-full ${SIZE_CLASSES[size]} animate-[scale-in_150ms_ease-out] flex-col rounded-xl bg-white shadow-xl outline-none`}
                 >
                     <div className="flex shrink-0 items-center justify-between p-6 pb-0">
                         <h2 id="modal-title" className="text-lg font-semibold text-slate-900">

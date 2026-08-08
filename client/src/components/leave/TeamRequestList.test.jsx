@@ -12,6 +12,7 @@ function makeRequest(overrides = {}) {
         id: "req-1",
         employee_first_name: "Asha",
         employee_last_name: "Employee",
+        employee_role: "EMPLOYEE",
         leave_type_name: "Annual Leave",
         status: "SUBMITTED",
         start_date: "2099-01-06",
@@ -33,12 +34,19 @@ describe("TeamRequestList", () => {
         expect(screen.getByRole("button", { name: /^reject$/i })).toBeInTheDocument();
     });
 
+    it("shows the employee's role next to their name", () => {
+        renderWithProviders(
+            <TeamRequestList requests={[makeRequest({ employee_role: "MANAGER" })]} canOverride={false} onChanged={vi.fn()} />
+        );
+        expect(screen.getByText("Manager")).toBeInTheDocument();
+    });
+
     it("hides approve/reject and override for a manager without override rights on a decided request", () => {
         renderWithProviders(
             <TeamRequestList requests={[makeRequest({ status: "APPROVED" })]} canOverride={false} onChanged={vi.fn()} />
         );
         expect(screen.queryByRole("button", { name: /approve|reject|override/i })).not.toBeInTheDocument();
-        expect(screen.getByRole("button", { name: /view history/i })).toBeInTheDocument();
+        expect(screen.getByRole("button", { name: /^details$/i })).toBeInTheDocument();
     });
 
     it("offers HR override in the direction that makes sense for each status", () => {
@@ -90,7 +98,7 @@ describe("TeamRequestList", () => {
         expect(onChanged).toHaveBeenCalled();
     });
 
-    it("opens the audit trail modal and loads history when View history is clicked", async () => {
+    it("opens the details modal and loads history when Details is clicked", async () => {
         leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([
             {
                 id: "a1",
@@ -104,7 +112,7 @@ describe("TeamRequestList", () => {
         ]);
         renderWithProviders(<TeamRequestList requests={[makeRequest()]} canOverride={false} onChanged={vi.fn()} />);
 
-        await userEvent.click(screen.getByRole("button", { name: /view history/i }));
+        await userEvent.click(screen.getByRole("button", { name: /^details$/i }));
 
         expect(leaveRequestService.getLeaveRequestAuditTrail).toHaveBeenCalledWith("req-1");
         expect(await screen.findByText("Priya Manager")).toBeInTheDocument();
