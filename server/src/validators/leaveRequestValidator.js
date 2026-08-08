@@ -4,6 +4,14 @@ import { z } from "zod";
 
 const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be in YYYY-MM-DD format");
 
+// Submitting with a document attached sends multipart/form-data (so multer
+// can read the file), which arrives as string fields for everything else —
+// unlike a plain JSON body, "false" comes through as the string "false", not
+// a boolean. z.coerce.boolean() would wrongly treat "false" as truthy, so
+// this maps the two string forms explicitly and passes actual booleans (the
+// JSON, no-attachment case) through unchanged.
+const booleanish = z.preprocess((value) => (typeof value === "string" ? value === "true" : value), z.boolean());
+
 // Shared by both the preview and submit schemas: the date range must not run
 // backwards, and a single-day request can't set both half-day flags (that
 // would zero the request out, which is never what the employee meant).
@@ -34,8 +42,8 @@ export const submitLeaveRequestSchema = z
         leaveTypeId: z.string().uuid("leaveTypeId must be a valid id"),
         startDate: dateStringSchema,
         endDate: dateStringSchema,
-        startHalfDay: z.boolean().optional().default(false),
-        endHalfDay: z.boolean().optional().default(false),
+        startHalfDay: booleanish.optional().default(false),
+        endHalfDay: booleanish.optional().default(false),
         reason: z.string().trim().min(1, "Reason is required"),
     })
     .superRefine(refineDateRange);

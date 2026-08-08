@@ -12,17 +12,27 @@ const BASE_COLUMNS = `id, employee_id, leave_type_id, start_date, end_date, star
 // a request's employee reports to), and whoever most recently decided it
 // (`decided_by` is only an id otherwise — LEFT JOIN since it's NULL for a
 // still-SUBMITTED request).
+// `has_document` (FR-012) lets the UI show a "view document" action only on
+// requests that actually have one, without a second round-trip per row — a
+// plain EXISTS subquery rather than a LEFT JOIN, since leave_request_documents
+// is at most one row per request and this only needs a boolean, not its columns.
+// `employee_role` lets the team/approvals view show a role badge next to the
+// employee's name (HR sees everyone's requests, so the role isn't otherwise
+// obvious from that list alone).
 const JOINED_COLUMNS = `
     lr.id, lr.employee_id, lr.leave_type_id, lt.name AS leave_type_name,
     lr.start_date, lr.end_date, lr.start_half_day, lr.end_half_day, lr.working_days,
     lr.reason, lr.status, lr.decided_by, lr.decided_at, lr.decision_comment,
     lr.created_at, lr.updated_at,
     u.first_name AS employee_first_name, u.last_name AS employee_last_name, u.manager_id AS employee_manager_id,
-    decider.first_name AS decided_by_first_name, decider.last_name AS decided_by_last_name
+    employee_role.role_name AS employee_role,
+    decider.first_name AS decided_by_first_name, decider.last_name AS decided_by_last_name,
+    EXISTS (SELECT 1 FROM leave_request_documents lrd WHERE lrd.leave_request_id = lr.id) AS has_document
 `;
 const JOINED_FROM = `FROM leave_requests lr
     JOIN leave_types lt ON lt.id = lr.leave_type_id
     JOIN users u ON u.id = lr.employee_id
+    JOIN roles employee_role ON employee_role.id = u.role_id
     LEFT JOIN users decider ON decider.id = lr.decided_by`;
 
 // Input: the submission fields (employeeId/leaveTypeId/dates/flags/workingDays/reason).

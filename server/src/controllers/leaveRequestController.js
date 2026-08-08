@@ -18,8 +18,9 @@ export async function submit(req, res, next) {
     try {
         // employee_id always comes from the authenticated session, never the
         // request body — a client can never submit a request on someone
-        // else's behalf.
-        const request = await leaveRequestService.submitLeaveRequest(req.user.id, req.body);
+        // else's behalf. req.file is undefined unless a "document" field was
+        // sent (uploadLeaveRequestDocument middleware, only wired for this route).
+        const request = await leaveRequestService.submitLeaveRequest(req.user.id, req.body, req.file);
         sendSuccess(res, 201, "Leave request submitted", request);
     } catch (error) {
         next(error);
@@ -57,6 +58,15 @@ export async function getAuditTrail(req, res, next) {
     try {
         const trail = await leaveRequestService.getAuditTrail(req.user, req.params.id);
         sendSuccess(res, 200, "Audit trail retrieved", trail);
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function getDocument(req, res, next) {
+    try {
+        const document = await leaveRequestService.getLeaveRequestDocument(req.user, req.params.id);
+        sendSuccess(res, 200, "Document retrieved", document);
     } catch (error) {
         next(error);
     }

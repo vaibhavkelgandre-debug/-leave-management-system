@@ -17,6 +17,14 @@ export function errorHandler(err, req, res, next) {
         return sendError(res, err.status, err.message, err.errors);
     }
 
+    // Multer raises this (rather than calling next() normally) when the
+    // uploaded file exceeds uploadMiddleware.js's size limit — surface it as
+    // a 400 the client can act on instead of a generic 500.
+    if (err.name === "MulterError") {
+        const message = err.code === "LIMIT_FILE_SIZE" ? "Document exceeds the 5MB size limit" : "File upload error";
+        return sendError(res, 400, message, []);
+    }
+
     // Postgres unique_violation — surface as a 409 instead of a generic 500
     // so callers know it's a duplicate-data problem they can act on.
     if (err.code === "23505") {

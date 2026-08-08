@@ -6,6 +6,7 @@ import express from "express";
 import * as controller from "../controllers/leaveRequestController.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
 import { requireRole } from "../middlewares/requireRole.js";
+import { uploadLeaveRequestDocument } from "../middlewares/uploadMiddleware.js";
 import { validateBody, validateParams } from "../validators/validate.js";
 import {
     previewLeaveRequestSchema,
@@ -20,7 +21,11 @@ const router = express.Router();
 router.use(requireAuth);
 
 router.post("/preview", validateBody(previewLeaveRequestSchema), controller.preview);
-router.post("/", validateBody(submitLeaveRequestSchema), controller.submit);
+// uploadLeaveRequestDocument (multer) only parses multipart/form-data bodies
+// — a plain JSON submission (no document attached) passes through untouched,
+// so this one route serves both cases. It must run before validateBody since
+// it's what turns the multipart body into req.body in the first place.
+router.post("/", uploadLeaveRequestDocument, validateBody(submitLeaveRequestSchema), controller.submit);
 router.get("/mine", controller.listMine);
 // A plain role check is correct here — "can you see a team-scoped list at
 // all" is a role question; which specific requests are in it is decided
@@ -29,6 +34,7 @@ router.get("/team", requireRole("MANAGER", "HR_ADMIN"), controller.listTeam);
 
 router.get("/:id", validateParams(leaveRequestIdParamSchema), controller.getOne);
 router.get("/:id/audit", validateParams(leaveRequestIdParamSchema), controller.getAuditTrail);
+router.get("/:id/document", validateParams(leaveRequestIdParamSchema), controller.getDocument);
 
 // approve/reject/withdraw/cancel have no route-level role check at all —
 // NFR-1 requires checking against the *specific record*, not just "are you

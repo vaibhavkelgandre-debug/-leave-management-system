@@ -19,10 +19,21 @@ import { getBalanceForUserAndType, seedBalancesForUser } from "../repositories/l
 import { insertLedgerEntry } from "../repositories/leaveBalanceLedgerRepository.js";
 import { findActiveDelegation } from "../repositories/delegationRepository.js";
 import { insertAuditLog, findAuditLogsForLeaveRequest } from "../repositories/auditLogRepository.js";
+import {
+    insertLeaveRequestDocument,
+    findDocumentByLeaveRequestId,
+} from "../repositories/leaveRequestDocumentRepository.js";
 import { calculateWorkingDays } from "./workingDayService.js";
 import { assertLegalTransition } from "./leaveRequestStateMachine.js";
+import { uploadLeaveRequestDocument, getSignedDocumentUrl } from "./cloudinaryService.js";
+import { detectFileType } from "../utils/fileType.js";
 import { todayDateKey } from "../utils/dates.js";
 import { badRequest, conflict, forbidden, notFound } from "../utils/appError.js";
+
+// FR-012 (Module 3, point 2): only these three content types are accepted
+// for a leave-request document, checked against the file's real bytes
+// (fileType.js) rather than its extension or reported Content-Type.
+const ACCEPTED_DOCUMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
 
 // Maps a state-machine action to the ledger `reason` tag it produces —
 // separate from the action name because the two override actions collapse
@@ -140,15 +151,37 @@ export async function previewWorkingDays({ startDate, endDate, startHalfDay, end
     return calculateWorkingDays({ startDate, endDate, startHalfDay, endHalfDay, holidays });
 }
 
-// Input: the submitting employee's id and the request fields. Output: the
-// newly created request (joined shape). Failure modes: 400 if the leave type
-// doesn't exist/is inactive, if the range has no working days, or if it would
-// take the balance below zero and the leave type doesn't allow that; 409 if
-// it overlaps an existing pending/approved request of the same employee's.
-export async function submitLeaveRequest(employeeId, { leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, reason }) {
+// Input: the submitting employee's id, the request fields, and an optional
+// `file` (multer's in-memory `{ buffer, size, originalname }`, or undefined
+// if none was attached). Output: the newly created request (joined shape).
+// Failure modes: 400 if the leave type doesn't exist/is inactive, if the
+// range has no working days, if it would take the balance below zero and the
+// leave type doesn't allow that, if the leave type requires a document and
+// none was attached, or if an attached file's real content isn't one of the
+// accepted types (FR-012); 409 if it overlaps an existing pending/approved
+// request of the same employee's.
+export async function submitLeaveRequest(
+    employeeId,
+    { leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, reason },
+    file
+) {
     const leaveType = await findLeaveTypeById(leaveTypeId);
     if (!leaveType || !leaveType.is_active) {
         throw badRequest("Leave type not found or inactive");
+    }
+
+    if (leaveType.requires_document && !file) {
+        throw badRequest(`A document is required for ${leaveType.name} requests`);
+    }
+
+    // Detected before anything else touches the DB or Cloudinary — never
+    // trust the client-reported mimetype/extension (NFR-4).
+    let detectedFileType = null;
+    if (file) {
+        detectedFileType = detectFileType(file.buffer);
+        if (!ACCEPTED_DOCUMENT_TYPES.has(detectedFileType)) {
+            throw badRequest("Document must be a PDF, JPG or PNG file");
+        }
     }
 
     const holidays = await findAllHolidays({});
@@ -172,6 +205,15 @@ export async function submitLeaveRequest(employeeId, { leaveTypeId, startDate, e
         throw badRequest("This request would take your balance below zero");
     }
 
+    // Uploaded last among the validation/pre-checks, and before the request
+    // row is inserted: if Cloudinary fails, nothing has been written to
+    // Postgres yet, so there's no partial leave request left behind and
+    // nothing to roll back.
+    let uploadedDocument = null;
+    if (file) {
+        uploadedDocument = await uploadLeaveRequestDocument({ buffer: file.buffer, mimeType: detectedFileType });
+    }
+
     const request = await insertLeaveRequest({
         employeeId,
         leaveTypeId,
@@ -182,6 +224,18 @@ export async function submitLeaveRequest(employeeId, { leaveTypeId, startDate, e
         workingDays,
         reason,
     });
+
+    if (uploadedDocument) {
+        await insertLeaveRequestDocument({
+            leaveRequestId: request.id,
+            cloudinaryPublicId: uploadedDocument.publicId,
+            cloudinaryResourceType: uploadedDocument.resourceType,
+            originalFilename: file.originalname,
+            mimeType: detectedFileType,
+            fileSizeBytes: file.size,
+            uploadedBy: employeeId,
+        });
+    }
 
     await insertLedgerEntry({
         userId: employeeId,
@@ -246,6 +300,28 @@ export async function getLeaveRequestById(actor, requestId) {
 export async function getAuditTrail(actor, requestId) {
     await getLeaveRequestById(actor, requestId); // throws 404 if the actor can't view this request at all
     return findAuditLogsForLeaveRequest(requestId);
+}
+
+// Input: the actor and a request id. Output: `{ url, filename, mimeType }` —
+// a signed Cloudinary URL valid for a few minutes (cloudinaryService.js),
+// generated fresh on every call rather than stored, so a document is never
+// reachable through a link that outlives this check. Same viewing rule as
+// getLeaveRequestById (FR-012: "visible only to the requester, their
+// approver and HR"). Failure modes: 404 if the actor can't view the request
+// at all, or if the request has no document attached.
+export async function getLeaveRequestDocument(actor, requestId) {
+    await getLeaveRequestById(actor, requestId); // throws 404 if the actor can't view this request at all
+
+    const document = await findDocumentByLeaveRequestId(requestId);
+    if (!document) {
+        throw notFound("This leave request has no document attached");
+    }
+
+    return {
+        url: getSignedDocumentUrl(document.cloudinary_public_id, document.cloudinary_resource_type),
+        filename: document.original_filename,
+        mimeType: document.mime_type,
+    };
 }
 
 // Input: the actor, the request id, the action being taken (one of the keys
