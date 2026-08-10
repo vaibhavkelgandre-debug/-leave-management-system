@@ -5,7 +5,7 @@
 // SQL, the controller stays thin glue, exactly like every other feature.
 import { findLeaveTypeById } from "../repositories/leaveTypeRepository.js";
 import { findAllHolidays } from "../repositories/holidayRepository.js";
-import { findDirectReports } from "../repositories/userRepository.js";
+import { findDirectReports, findSubtreeUsers, isUserInSubtree } from "../repositories/userRepository.js";
 import {
     insertLeaveRequest,
     findLeaveRequestById,
@@ -17,7 +17,7 @@ import {
 } from "../repositories/leaveRequestRepository.js";
 import { getBalanceForUserAndType, seedBalancesForUser } from "../repositories/leaveBalanceRepository.js";
 import { insertLedgerEntry } from "../repositories/leaveBalanceLedgerRepository.js";
-import { findActiveDelegation } from "../repositories/delegationRepository.js";
+import { findActiveDelegation, findActiveDelegatedManagerIds } from "../repositories/delegationRepository.js";
 import { insertAuditLog, findAuditLogsForLeaveRequest } from "../repositories/auditLogRepository.js";
 import {
     insertLeaveRequestDocument,
@@ -25,7 +25,7 @@ import {
 } from "../repositories/leaveRequestDocumentRepository.js";
 import { calculateWorkingDays } from "./workingDayService.js";
 import { assertLegalTransition } from "./leaveRequestStateMachine.js";
-import { uploadLeaveRequestDocument, getSignedDocumentUrl } from "./cloudinaryService.js";
+import { uploadLeaveRequestDocument, getSignedDocumentUrl, fetchDocumentStream } from "./cloudinaryService.js";
 import { detectFileType } from "../utils/fileType.js";
 import { todayDateKey } from "../utils/dates.js";
 import { badRequest, conflict, forbidden, notFound } from "../utils/appError.js";
@@ -101,10 +101,21 @@ async function isManagerOrDelegateOf(actorId, employeeManagerId) {
 // the action they're attempting. Output: `{ actedFor }` — `actedFor` is the
 // manager being represented when a delegate acts, otherwise null (FR-020's
 // audit requirement). Failure modes: 404 when the actor has no legitimate
-// reason to know this request exists at all (an unrelated manager or
-// employee); 403 when they know it exists but this action isn't theirs to
-// take (their own request, wrong role, or a delegation window that isn't
-// active today) — see the NFR-5 policy note in .claude/rules.md.
+// reason to know this request exists at all (an unrelated manager, an
+// unrelated HR admin, or an unrelated employee); 403 when they know it
+// exists but this action isn't theirs to take (their own request, wrong
+// role, or a delegation window that isn't active today) — see the NFR-5
+// policy note in .claude/rules.md.
+//
+// HR's authority is scoped to their own reporting subtree
+// (`isUserInSubtree`), not the whole company: this app supports more than
+// one HR_ADMIN, each the root of their own separate branch (a MANAGER's own
+// manager_id names one specific HR admin, not the role generically), so
+// "HR can act on any request" from the brief means *their* requests, the
+// same way it would for a manager — not every other HR admin's branch too.
+// Company-wide visibility for HR is still available read-only via
+// listAllLeaveRequests/getLeaveRequestById below, which this function has
+// no bearing on; only the mutating actions are scoped here.
 async function resolveActingCapacity(actor, request, action) {
     const isOwner = actor.id === request.employee_id;
 
@@ -123,16 +134,23 @@ async function resolveActingCapacity(actor, request, action) {
     }
 
     if (action === "HR_OVERRIDE_TO_APPROVED" || action === "HR_OVERRIDE_TO_REJECTED") {
-        if (actor.role === "HR_ADMIN") {
+        if (actor.role !== "HR_ADMIN") {
+            throw forbidden("Only HR can override a decision");
+        }
+        if (await isUserInSubtree(actor.id, request.employee_id)) {
             return { actedFor: null };
         }
-        throw forbidden("Only HR can override a decision");
+        throw notFound("Leave request not found");
     }
 
-    // APPROVE / REJECT: HR can act on anything; otherwise the actor must be
-    // the employee's direct manager or an active delegate for that manager.
+    // APPROVE / REJECT: HR can act on their own reporting subtree; otherwise
+    // the actor must be the employee's direct manager or an active delegate
+    // for that manager.
     if (actor.role === "HR_ADMIN") {
-        return { actedFor: null };
+        if (await isUserInSubtree(actor.id, request.employee_id)) {
+            return { actedFor: null };
+        }
+        throw notFound("Leave request not found");
     }
     if (await isManagerOrDelegateOf(actor.id, request.employee_manager_id)) {
         const actingAsDelegate = request.employee_manager_id !== actor.id;
@@ -263,17 +281,45 @@ export async function listMyLeaveRequests(employeeId) {
     return findLeaveRequestsForEmployee(employeeId);
 }
 
-// Output: requests the actor can act on — everything, for HR; only direct
-// reports, for a manager. Deliberately direct-reports-only rather than the
-// full reporting subtree: approval authority belongs to the direct manager
-// (or their delegate), not a skip-level manager further up the tree, so the
-// list an actor sees matches exactly what they're allowed to act on.
+// Output: requests the actor can act on — their own full reporting subtree
+// for HR (see resolveActingCapacity's note on why this is scoped, not
+// company-wide); direct reports only, for a manager, plus (while it's
+// active) any manager's team they're currently standing in for as a
+// delegate. Deliberately direct-reports-only for a manager rather than
+// their full subtree: approval authority belongs to the direct manager (or
+// their delegate), not a skip-level manager further up the tree — HR is the
+// one exception, since HR's subtree root *is* the top of their branch, with
+// no further level above it to defer to. This mirrors isManagerOrDelegateOf
+// and the HR branch of resolveActingCapacity above, just listing everything
+// those checks would say yes to instead of checking one request at a time.
+// Not role-gated at the route level for this reason: the delegate can be a
+// plain EMPLOYEE with no direct reports of their own, who should still see
+// (and be able to act on) the delegated team's requests here.
 export async function listTeamLeaveRequests(actor) {
     if (actor.role === "HR_ADMIN") {
-        return findAllLeaveRequests();
+        const subtree = await findSubtreeUsers(actor.id);
+        const employeeIds = subtree.filter((person) => person.id !== actor.id).map((person) => person.id);
+        return findLeaveRequestsForEmployees(employeeIds);
     }
+
     const reports = await findDirectReports(actor.id);
-    return findLeaveRequestsForEmployees(reports.map((report) => report.id));
+    const delegatedManagerIds = await findActiveDelegatedManagerIds(actor.id, todayDateKey());
+    const delegatedReports = await Promise.all(delegatedManagerIds.map((managerId) => findDirectReports(managerId)));
+
+    const employeeIds = [...reports, ...delegatedReports.flat()].map((report) => report.id);
+    return findLeaveRequestsForEmployees(employeeIds);
+}
+
+// Output: literally every leave request in the system — HR's company-wide
+// "All Requests" view for browsing/context (route-gated to HR_ADMIN only,
+// see leaveRequestRoutes.js — a plain role check is correct there, same
+// reasoning as the existing /team comment). This is deliberately broader
+// than what listTeamLeaveRequests' HR branch (and resolveActingCapacity)
+// actually let an HR admin *act* on — company-wide visibility for context
+// is still useful even though acting is scoped to one's own branch, the
+// same distinction NFR-5's viewing-vs-acting split already draws elsewhere.
+export async function listAllLeaveRequests() {
+    return findAllLeaveRequests();
 }
 
 // Input: the actor and a request id. Output: the request, if the actor is
@@ -322,6 +368,17 @@ export async function getLeaveRequestDocument(actor, requestId) {
         filename: document.original_filename,
         mimeType: document.mime_type,
     };
+}
+
+// Input: the actor and a request id. Output: `{ stream, filename, mimeType }`
+// for forcing a real download instead of a signed URL the browser just
+// navigates to (see fetchDocumentStream). Same viewing rule/failure modes as
+// getLeaveRequestDocument, which this reuses for the authorization check and
+// metadata before fetching the actual bytes.
+export async function downloadLeaveRequestDocument(actor, requestId) {
+    const { url, filename, mimeType } = await getLeaveRequestDocument(actor, requestId);
+    const stream = await fetchDocumentStream(url);
+    return { stream, filename, mimeType };
 }
 
 // Input: the actor, the request id, the action being taken (one of the keys

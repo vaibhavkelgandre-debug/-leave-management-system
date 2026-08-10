@@ -45,6 +45,15 @@ export async function listTeam(req, res, next) {
     }
 }
 
+export async function listAll(req, res, next) {
+    try {
+        const requests = await leaveRequestService.listAllLeaveRequests();
+        sendSuccess(res, 200, "Leave requests retrieved", requests);
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getOne(req, res, next) {
     try {
         const request = await leaveRequestService.getLeaveRequestById(req.user, req.params.id);
@@ -67,6 +76,31 @@ export async function getDocument(req, res, next) {
     try {
         const document = await leaveRequestService.getLeaveRequestDocument(req.user, req.params.id);
         sendSuccess(res, 200, "Document retrieved", document);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Streams the document back with Content-Disposition: attachment so the
+// browser saves it to disk instead of navigating to it — see
+// cloudinaryService.fetchDocumentStream for why a plain signed-URL link
+// can't do this on its own. `filename` is stripped of quotes/CRLF before
+// going into the header since it's a user-supplied original filename, not a
+// value this app generated.
+export async function downloadDocument(req, res, next) {
+    try {
+        const { stream, filename, mimeType } = await leaveRequestService.downloadLeaveRequestDocument(
+            req.user,
+            req.params.id
+        );
+        const safeFilename = filename.replace(/["\r\n]/g, "");
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+        );
+        stream.on("error", next);
+        stream.pipe(res);
     } catch (error) {
         next(error);
     }

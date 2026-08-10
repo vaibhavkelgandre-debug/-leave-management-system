@@ -6,10 +6,15 @@
 // one "View details" action; AuditTrail.jsx has been folded in here and
 // retired now that both of its callers open this instead.
 import { useEffect, useState } from "react";
+import { Download } from "lucide-react";
 import { Modal } from "../ui/Modal.jsx";
+import { Button } from "../ui/Button.jsx";
 import { StatusBadge } from "../ui/Badge.jsx";
-import { DocumentPreview } from "./DocumentPreview.jsx";
-import { getLeaveRequestAuditTrail, getLeaveRequestDocument } from "../../services/leaveRequestService.js";
+import {
+    getLeaveRequestAuditTrail,
+    getLeaveRequestDocument,
+    getLeaveRequestDocumentDownloadUrl,
+} from "../../services/leaveRequestService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { formatDateRange, formatDateTime } from "../../utils/dates.js";
 
@@ -51,7 +56,9 @@ function AuditEntryRow({ entry }) {
 // one, the document are fetched lazily on open, each keyed by the request id
 // they were fetched for (same stale-result guard AuditTrail.jsx used) so
 // switching to a different request without unmounting doesn't show a
-// flash of the previous one's data.
+// flash of the previous one's data. The document itself is offered as a
+// filename + download link rather than embedded inline — an approver only
+// needs to open/save it, not read it inside this modal.
 export function RequestDetailModal({ request, open, onClose }) {
     const [trailResult, setTrailResult] = useState(null);
     const [docResult, setDocResult] = useState(null);
@@ -131,9 +138,18 @@ export function RequestDetailModal({ request, open, onClose }) {
                         )}
                         {!docError && !doc && <p className="mt-1 text-sm text-slate-500">Loading…</p>}
                         {doc && (
-                            <div className="mt-1">
-                                <DocumentPreview url={doc.url} mimeType={doc.mimeType} filename={doc.filename} />
-                                <p className="mt-1 text-xs text-slate-500">{doc.filename}</p>
+                            <div className="mt-1 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                                <span className="min-w-0 truncate text-sm text-slate-700">{doc.filename}</span>
+                                <Button
+                                    as="a"
+                                    href={getLeaveRequestDocumentDownloadUrl(request.id)}
+                                    download={doc.filename}
+                                    variant="secondary"
+                                    size="sm"
+                                    icon={Download}
+                                >
+                                    Download
+                                </Button>
                             </div>
                         )}
                     </div>

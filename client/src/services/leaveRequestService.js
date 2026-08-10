@@ -49,6 +49,17 @@ export async function getTeamLeaveRequests() {
     return unwrap(response);
 }
 
+// HR-only company-wide view — see server/src/routes/leaveRequestRoutes.js.
+// Broader than getTeamLeaveRequests' own HR results: that one is scoped to
+// the caller's own reporting subtree (what they can actually act on), this
+// one is everyone (for browsing/context only — the server still enforces
+// the same subtree scoping if an action is attempted on a row from here
+// that isn't actually the caller's).
+export async function getAllLeaveRequests() {
+    const response = await apiClient.get("/leave-requests/all");
+    return unwrap(response);
+}
+
 export async function getLeaveRequestAuditTrail(id) {
     const response = await apiClient.get(`/leave-requests/${id}/audit`);
     return unwrap(response);
@@ -60,6 +71,15 @@ export async function getLeaveRequestAuditTrail(id) {
 export async function getLeaveRequestDocument(id) {
     const response = await apiClient.get(`/leave-requests/${id}/document`);
     return unwrap(response);
+}
+
+// A plain URL, not an axios call — meant for an <a href>. Points at the
+// backend's own streaming endpoint (Content-Disposition: attachment) rather
+// than the signed Cloudinary URL from getLeaveRequestDocument, since a link
+// straight to a cross-origin URL ignores the `download` attribute and just
+// navigates there instead of saving a local copy.
+export function getLeaveRequestDocumentDownloadUrl(id) {
+    return `${apiClient.defaults.baseURL}/leave-requests/${id}/document/download`;
 }
 
 export async function approveLeaveRequest(id, comment) {

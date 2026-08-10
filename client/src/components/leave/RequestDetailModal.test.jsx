@@ -128,32 +128,29 @@ describe("RequestDetailModal", () => {
         expect(leaveRequestService.getLeaveRequestDocument).not.toHaveBeenCalled();
     });
 
-    it("embeds an image document inline via <img>", async () => {
+    it("shows the document's filename with a download link instead of an inline preview", async () => {
         leaveRequestService.getLeaveRequestDocument.mockResolvedValue({
             url: "https://res.cloudinary.com/mock/cert.jpg",
             filename: "cert.jpg",
             mimeType: "image/jpeg",
         });
+        leaveRequestService.getLeaveRequestDocumentDownloadUrl.mockReturnValue(
+            "http://localhost:5001/api/leave-requests/req-1/document/download"
+        );
         renderWithProviders(<RequestDetailModal request={makeRequest({ has_document: true })} open onClose={vi.fn()} />);
 
         expect(leaveRequestService.getLeaveRequestDocument).toHaveBeenCalledWith("req-1");
-        const image = await screen.findByRole("img", { name: "cert.jpg" });
-        expect(image).toHaveAttribute("src", "https://res.cloudinary.com/mock/cert.jpg");
-    });
-
-    it("embeds a PDF document inline via <iframe>", async () => {
-        leaveRequestService.getLeaveRequestDocument.mockResolvedValue({
-            url: "https://res.cloudinary.com/mock/cert.pdf",
-            filename: "cert.pdf",
-            mimeType: "application/pdf",
-        });
-        renderWithProviders(<RequestDetailModal request={makeRequest({ has_document: true })} open onClose={vi.fn()} />);
-
-        await screen.findByText("cert.pdf");
-        // Modal renders via a portal straight into `document.body`, outside
-        // RTL's own `container` div — query the document, not the container.
-        const iframe = document.querySelector("iframe");
-        expect(iframe).toHaveAttribute("src", "https://res.cloudinary.com/mock/cert.pdf");
+        expect(await screen.findByText("cert.jpg")).toBeInTheDocument();
+        // The link goes through this app's own streaming endpoint (forces a
+        // real download via Content-Disposition), not the raw signed
+        // Cloudinary URL — a plain cross-origin link would just navigate
+        // there instead of saving a local copy.
+        expect(screen.getByRole("link", { name: /download/i })).toHaveAttribute(
+            "href",
+            "http://localhost:5001/api/leave-requests/req-1/document/download"
+        );
+        expect(screen.queryByRole("img")).not.toBeInTheDocument();
+        expect(document.querySelector("iframe")).not.toBeInTheDocument();
     });
 
     it("shows an inline error when the document fails to load", async () => {

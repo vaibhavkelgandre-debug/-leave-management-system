@@ -43,6 +43,40 @@ export async function findDelegationsForManager(managerId) {
     return result.rows;
 }
 
+// Input: a delegate id. Output: every delegation where they're the
+// delegate, most recent start date first — the flip side of
+// findDelegationsForManager, joined against the manager instead of the
+// delegate so the UI can show whose approvals they're covering.
+export async function findDelegationsForDelegate(delegateId) {
+    const result = await pool.query(
+        `SELECT d.id, d.manager_id, d.delegate_id,
+                m.first_name AS manager_first_name, m.last_name AS manager_last_name,
+                d.start_date, d.end_date, d.created_at
+         FROM delegations d
+         JOIN users m ON m.id = d.manager_id
+         WHERE d.delegate_id = $1
+         ORDER BY d.start_date DESC`,
+        [delegateId]
+    );
+    return result.rows;
+}
+
+// Input: a delegate id and a "YYYY-MM-DD" date. Output: the manager ids this
+// delegate is actively standing in for on that date — plural, since nothing
+// stops the same person delegating for two different managers at once (only
+// a single manager's own ranges can't overlap each other, see
+// findOverlappingDelegationForManager below). Used by
+// leaveRequestService.listTeamLeaveRequests to merge each covered manager's
+// team into the delegate's own approvals view for the active window.
+export async function findActiveDelegatedManagerIds(delegateId, onDate) {
+    const result = await pool.query(
+        `SELECT manager_id FROM delegations
+         WHERE delegate_id = $1 AND start_date <= $2 AND end_date >= $2`,
+        [delegateId, onDate]
+    );
+    return result.rows.map((row) => row.manager_id);
+}
+
 // FR-020's overlap guard: two delegations for the *same* manager must not
 // have overlapping date ranges, or "who's the active delegate today" would be
 // ambiguous. Same interval-overlap test already used for holidays.

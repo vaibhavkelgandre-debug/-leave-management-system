@@ -81,4 +81,63 @@ describe("Delegations", () => {
 
         expect(response.body.data).toHaveLength(0);
     });
+
+    describe("GET /api/delegations/as-delegate", () => {
+        it("requires authentication", async () => {
+            const response = await request(app).get("/api/delegations/as-delegate");
+            expect(response.statusCode).toBe(401);
+        });
+
+        // Deliberately not manager-gated, unlike every other route in this
+        // file — a plain EMPLOYEE can be nominated as a delegate (nothing
+        // checks the candidate's role in createDelegation) and needs this
+        // endpoint to find out at all, since nothing else notifies them.
+        it("lets a plain employee (not just a manager) see delegations nominating them", async () => {
+            const manager = await createUser({ role: "MANAGER", email: "deleg-asdel-manager@example.com" });
+            const employeeDelegate = await createUser({ email: "deleg-asdel-employee@example.com" });
+            const managerAgent = await loginAs(manager);
+
+            const created = await managerAgent
+                .post("/api/delegations")
+                .send({ delegateId: employeeDelegate.id, startDate: "2027-09-01", endDate: "2027-09-14" });
+            expect(created.statusCode).toBe(201);
+
+            const delegateAgent = await loginAs(employeeDelegate);
+            const response = await delegateAgent.get("/api/delegations/as-delegate");
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data).toHaveLength(1);
+            expect(response.body.data[0]).toMatchObject({
+                manager_id: manager.id,
+                manager_first_name: manager.first_name,
+                manager_last_name: manager.last_name,
+                start_date: "2027-09-01",
+                end_date: "2027-09-14",
+            });
+        });
+
+        it("returns an empty list for someone nobody has delegated to", async () => {
+            const employee = await createUser({ email: "deleg-asdel-none@example.com" });
+            const agent = await loginAs(employee);
+
+            const response = await agent.get("/api/delegations/as-delegate");
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data).toEqual([]);
+        });
+
+        it("doesn't list delegations this user nominated themself as the manager", async () => {
+            const manager = await createUser({ role: "MANAGER", email: "deleg-asdel-notmine@example.com" });
+            const delegate = await createUser({ role: "MANAGER", email: "deleg-asdel-notmine-delegate@example.com" });
+            const managerAgent = await loginAs(manager);
+
+            await managerAgent
+                .post("/api/delegations")
+                .send({ delegateId: delegate.id, startDate: "2027-10-01", endDate: "2027-10-05" });
+
+            const response = await managerAgent.get("/api/delegations/as-delegate");
+
+            expect(response.body.data).toEqual([]);
+        });
+    });
 });

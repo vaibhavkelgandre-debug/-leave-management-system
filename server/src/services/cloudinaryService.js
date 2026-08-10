@@ -2,6 +2,7 @@
 // Kept separate from leaveRequestService.js so the business logic there
 // never touches the Cloudinary SDK directly.
 import { randomUUID } from "node:crypto";
+import { Readable } from "node:stream";
 import cloudinary from "../config/cloudinary.js";
 
 const FOLDER = "leave-request-documents";
@@ -50,4 +51,20 @@ export function getSignedDocumentUrl(publicId, resourceType) {
         secure: true,
         expires_at: expiresAt,
     });
+}
+
+// Input: a signed URL from getSignedDocumentUrl. Output: a Node Readable of
+// the document's bytes. Used to proxy the file through this app's own
+// response instead of handing the Cloudinary URL to the browser directly —
+// a plain `<a href>` to a cross-origin URL ignores the `download` attribute
+// and just navigates to it, so forcing an actual save-to-disk requires this
+// app to set its own Content-Disposition header on a response it controls.
+// Failure mode: rejects if Cloudinary's response isn't a successful body
+// (e.g. the signed URL expired between minting it and this call).
+export async function fetchDocumentStream(url) {
+    const response = await fetch(url);
+    if (!response.ok || !response.body) {
+        throw new Error(`Failed to fetch document from Cloudinary (status ${response.status})`);
+    }
+    return Readable.fromWeb(response.body);
 }

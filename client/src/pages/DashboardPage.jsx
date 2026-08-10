@@ -4,13 +4,16 @@ import { RoleBadge } from "../components/ui/Badge.jsx";
 import { MyLeaveSummary } from "../components/dashboard/MyLeaveSummary.jsx";
 import { TeamOverviewSummary } from "../components/dashboard/TeamOverviewSummary.jsx";
 import { DelegationStatus } from "../components/dashboard/DelegationStatus.jsx";
+import { DelegateStatus } from "../components/dashboard/DelegateStatus.jsx";
 
 export function DashboardPage() {
     const { user, hasAnyRole } = useAuth();
     // Team overview is meaningful for anyone who can see a team-scoped
     // request list at all (leaveRequestService.listTeamLeaveRequests scopes
-    // it server-side); delegation status only applies to managers, since
-    // HR can't nominate a delegate.
+    // it server-side); DelegationStatus (nominating someone) only applies to
+    // managers, since HR can't nominate a delegate — but DelegateStatus (the
+    // flip side, being nominated) isn't role-gated at all: a plain EMPLOYEE
+    // can be someone's delegate just as easily as a manager can.
     const isManagerOrHr = hasAnyRole([ROLES.MANAGER, ROLES.HR_ADMIN]);
     const isManager = hasAnyRole([ROLES.MANAGER]);
 
@@ -23,6 +26,7 @@ export function DashboardPage() {
 
             <div className="mt-6 space-y-4">
                 {isManager && <DelegationStatus />}
+                <DelegateStatus />
                 {isManagerOrHr && <TeamOverviewSummary />}
                 <MyLeaveSummary />
             </div>

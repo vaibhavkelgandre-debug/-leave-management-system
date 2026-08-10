@@ -3,6 +3,7 @@
 // google-auth-library) — these tests exercise the real DB and the real
 // requires-document/file-type/authorization rules, without spending a real
 // Cloudinary account's quota or needing network access to run.
+import { Readable } from "node:stream";
 import request from "supertest";
 import { vi, describe, it, expect } from "vitest";
 import app from "../../app.js";
@@ -12,6 +13,9 @@ import { loginAs } from "./helpers/authHelpers.js";
 vi.mock("../../services/cloudinaryService.js", () => ({
     uploadLeaveRequestDocument: vi.fn().mockResolvedValue({ publicId: "mock-public-id", resourceType: "image" }),
     getSignedDocumentUrl: vi.fn().mockReturnValue("https://res.cloudinary.com/mock/signed-url"),
+    // A fresh stream per call — a Readable can only be consumed once, and
+    // more than one test in this file downloads a document.
+    fetchDocumentStream: vi.fn().mockImplementation(() => Promise.resolve(Readable.from([Buffer.from("mock file bytes")]))),
 }));
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\n%mock pdf content for tests");
@@ -83,6 +87,49 @@ describe("Leave request documents", () => {
         const outsiderAgent = await loginAs(outsider);
         const outsiderDocResponse = await outsiderAgent.get(`/api/leave-requests/${requestId}/document`);
         expect(outsiderDocResponse.statusCode).toBe(404);
+    });
+
+    it("streams the document with Content-Disposition: attachment instead of the raw signed URL", async () => {
+        const employee = await createUser({ email: "doc-download@example.com" });
+        const leaveType = await createLeaveType({ name: "Sick Leave Download", requiresDocument: true });
+        const agent = await loginAs(employee);
+
+        const submitResponse = await agent
+            .post("/api/leave-requests")
+            .field("leaveTypeId", leaveType.id)
+            .field("startDate", "2030-06-12")
+            .field("endDate", "2030-06-13")
+            .field("reason", "Feeling unwell")
+            .attach("document", PDF_BYTES, { filename: "cert.pdf", contentType: "application/pdf" });
+        const requestId = submitResponse.body.data.id;
+
+        const response = await agent.get(`/api/leave-requests/${requestId}/document/download`);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["content-type"]).toBe("application/pdf");
+        expect(response.headers["content-disposition"]).toContain('attachment; filename="cert.pdf"');
+        expect(Buffer.from(response.body).toString()).toBe("mock file bytes");
+    });
+
+    it("returns 404 when someone outside the viewing rule tries to download the document", async () => {
+        const employee = await createUser({ email: "doc-download-owner@example.com" });
+        const outsider = await createUser({ email: "doc-download-outsider@example.com" });
+        const leaveType = await createLeaveType({ name: "Sick Leave Download Outsider", requiresDocument: true });
+        const agent = await loginAs(employee);
+
+        const submitResponse = await agent
+            .post("/api/leave-requests")
+            .field("leaveTypeId", leaveType.id)
+            .field("startDate", "2030-06-14")
+            .field("endDate", "2030-06-15")
+            .field("reason", "Feeling unwell")
+            .attach("document", PDF_BYTES, { filename: "cert.pdf", contentType: "application/pdf" });
+        const requestId = submitResponse.body.data.id;
+
+        const outsiderAgent = await loginAs(outsider);
+        const response = await outsiderAgent.get(`/api/leave-requests/${requestId}/document/download`);
+
+        expect(response.statusCode).toBe(404);
     });
 
     it("returns 404 for a request that has no document attached", async () => {

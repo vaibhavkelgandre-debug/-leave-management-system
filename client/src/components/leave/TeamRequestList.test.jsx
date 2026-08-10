@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { renderWithProviders } from "../../tests/renderWithProviders.jsx";
+import { renderWithProviders, makeAuthValue } from "../../tests/renderWithProviders.jsx";
 import { TeamRequestList } from "./TeamRequestList.jsx";
+import { ROLES } from "../../constants/roles.js";
 import * as leaveRequestService from "../../services/leaveRequestService.js";
 
 vi.mock("../../services/leaveRequestService.js");
@@ -116,5 +117,59 @@ describe("TeamRequestList", () => {
 
         expect(leaveRequestService.getLeaveRequestAuditTrail).toHaveBeenCalledWith("req-1");
         expect(await screen.findByText("Priya Manager")).toBeInTheDocument();
+    });
+
+    it("doesn't show a delegated badge for the viewer's own direct report", () => {
+        renderWithProviders(
+            <TeamRequestList
+                requests={[makeRequest({ employee_manager_id: "mgr-1", manager_first_name: "Priya", manager_last_name: "Manager" })]}
+                canOverride={false}
+                onChanged={vi.fn()}
+            />,
+            { authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }) }
+        );
+        expect(screen.queryByText(/delegated for/i)).not.toBeInTheDocument();
+    });
+
+    it("shows a delegated badge naming the covered manager when the row belongs to a manager the viewer is only standing in for", () => {
+        renderWithProviders(
+            <TeamRequestList
+                requests={[makeRequest({ employee_manager_id: "mgr-1", manager_first_name: "Priya", manager_last_name: "Manager" })]}
+                canOverride={false}
+                onChanged={vi.fn()}
+            />,
+            { authValue: makeAuthValue({ user: { id: "delegate-1", role: ROLES.EMPLOYEE } }) }
+        );
+        expect(screen.getByText(/delegated for priya manager/i)).toBeInTheDocument();
+    });
+
+    describe("readOnly", () => {
+        it("shows no approve/reject/override actions regardless of status, only Details", () => {
+            renderWithProviders(
+                <TeamRequestList
+                    requests={[makeRequest({ id: "a", status: "SUBMITTED" }), makeRequest({ id: "b", status: "APPROVED" })]}
+                    canOverride
+                    onChanged={vi.fn()}
+                    readOnly
+                />
+            );
+            expect(screen.queryByRole("button", { name: /approve|reject|override/i })).not.toBeInTheDocument();
+            expect(screen.getAllByRole("button", { name: /^details$/i })).toHaveLength(2);
+        });
+
+        it("doesn't show a delegated badge either, since every row's manager differs from an HR viewer as a matter of course", () => {
+            renderWithProviders(
+                <TeamRequestList
+                    requests={[
+                        makeRequest({ employee_manager_id: "mgr-1", manager_first_name: "Priya", manager_last_name: "Manager" }),
+                    ]}
+                    canOverride
+                    onChanged={vi.fn()}
+                    readOnly
+                />,
+                { authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }) }
+            );
+            expect(screen.queryByText(/delegated for/i)).not.toBeInTheDocument();
+        });
     });
 });

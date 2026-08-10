@@ -293,13 +293,15 @@ describe("Leave requests", () => {
 
     describe("HR override", () => {
         it("overrides a rejected request to approved, and it now counts as taken", async () => {
-            const manager = await createUser({ role: "MANAGER", email: "override-mgr@example.com" });
+            const hr = await createRootHr({ email: "override-hr@example.com" });
+            // Must actually be in this HR's reporting subtree — HR's override
+            // authority is scoped to their own branch, not company-wide.
+            const manager = await createUser({ role: "MANAGER", managerId: hr.id, email: "override-mgr@example.com" });
             const employee = await createUser({
                 role: "EMPLOYEE",
                 managerId: manager.id,
                 email: "override-emp@example.com",
             });
-            const hr = await createRootHr({ email: "override-hr@example.com" });
             const leaveType = await createLeaveType({ name: "Override Leave", annualEntitlement: 10 });
             const leaveRequest = await createLeaveRequest({
                 employeeId: employee.id,
@@ -449,6 +451,85 @@ describe("Leave requests", () => {
 
             expect(response.statusCode).toBe(200);
         });
+
+        it("lets an HR admin approve a request within their own reporting subtree", async () => {
+            const hr = await createRootHr({ email: "authz-hr-own-branch@example.com" });
+            const manager = await createUser({ role: "MANAGER", managerId: hr.id, email: "authz-hr-own-mgr@example.com" });
+            const employee = await createUser({
+                role: "EMPLOYEE",
+                managerId: manager.id,
+                email: "authz-hr-own-emp@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "HR Own Branch Leave", annualEntitlement: 10 });
+            const leaveRequest = await createLeaveRequest({
+                employeeId: employee.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-11-28",
+                endDate: "2030-11-29",
+            });
+
+            const hrAgent = await loginAs(hr);
+            const response = await hrAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+
+            expect(response.statusCode).toBe(200);
+        });
+
+        it("stops an HR admin approving a request outside their own reporting subtree — this app supports more than one HR_ADMIN", async () => {
+            const hrA = await createRootHr({ email: "authz-hrA@example.com" });
+            const hrB = await createRootHr({ email: "authz-hrB@example.com" });
+            const managerOfB = await createUser({ role: "MANAGER", managerId: hrB.id, email: "authz-mgr-of-hrB@example.com" });
+            const employeeOfB = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfB.id,
+                email: "authz-emp-of-hrB@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Cross-HR Leave", annualEntitlement: 10 });
+            const leaveRequest = await createLeaveRequest({
+                employeeId: employeeOfB.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-04",
+                endDate: "2030-12-05",
+            });
+
+            const hrAAgent = await loginAs(hrA);
+            const response = await hrAAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+
+            // Same 404 as "no relationship at all" — an unrelated HR admin has
+            // no more legitimate reason to know this request exists than an
+            // unrelated manager does.
+            expect(response.statusCode).toBe(404);
+        });
+
+        it("stops an HR admin overriding a decision outside their own reporting subtree", async () => {
+            const hrA = await createRootHr({ email: "authz-override-hrA@example.com" });
+            const hrB = await createRootHr({ email: "authz-override-hrB@example.com" });
+            const managerOfB = await createUser({
+                role: "MANAGER",
+                managerId: hrB.id,
+                email: "authz-override-mgr-of-hrB@example.com",
+            });
+            const employeeOfB = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfB.id,
+                email: "authz-override-emp-of-hrB@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Cross-HR Override Leave", annualEntitlement: 10 });
+            const leaveRequest = await createLeaveRequest({
+                employeeId: employeeOfB.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-06",
+                endDate: "2030-12-07",
+            });
+            const managerOfBAgent = await loginAs(managerOfB);
+            await managerOfBAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+
+            const hrAAgent = await loginAs(hrA);
+            const response = await hrAAgent
+                .post(`/api/leave-requests/${leaveRequest.id}/override`)
+                .send({ toStatus: "REJECTED" });
+
+            expect(response.statusCode).toBe(404);
+        });
     });
 
     describe("listing", () => {
@@ -476,10 +557,10 @@ describe("Leave requests", () => {
             expect(response.body.data[0].employee_id).toBe(employeeA.id);
         });
 
-        it("shows a manager only their direct reports' requests, and HR everyone's", async () => {
-            const managerA = await createUser({ role: "MANAGER", email: "list-mgrA@example.com" });
-            const managerB = await createUser({ role: "MANAGER", email: "list-mgrB@example.com" });
+        it("shows a manager only their direct reports' requests, and HR their whole reporting subtree", async () => {
             const hr = await createRootHr({ email: "list-hr@example.com" });
+            const managerA = await createUser({ role: "MANAGER", managerId: hr.id, email: "list-mgrA@example.com" });
+            const managerB = await createUser({ role: "MANAGER", managerId: hr.id, email: "list-mgrB@example.com" });
             const employeeOfA = await createUser({
                 role: "EMPLOYEE",
                 managerId: managerA.id,
@@ -514,10 +595,129 @@ describe("Leave requests", () => {
             expect(teamHrResponse.body.data).toHaveLength(2);
         });
 
-        it("rejects an employee trying to view the team list", async () => {
+        it("scopes HR's /team list to their own branch, not another HR admin's — this app supports more than one HR_ADMIN", async () => {
+            const hrA = await createRootHr({ email: "list-hrA@example.com" });
+            const hrB = await createRootHr({ email: "list-hrB@example.com" });
+            const managerOfA = await createUser({ role: "MANAGER", managerId: hrA.id, email: "list-mgr-of-hrA@example.com" });
+            const managerOfB = await createUser({ role: "MANAGER", managerId: hrB.id, email: "list-mgr-of-hrB@example.com" });
+            const employeeOfA = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfA.id,
+                email: "list-emp-of-hrA@example.com",
+            });
+            const employeeOfB = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfB.id,
+                email: "list-emp-of-hrB@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Cross-HR Listing Leave", annualEntitlement: 10 });
+            await createLeaveRequest({
+                employeeId: employeeOfA.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-11",
+                endDate: "2030-12-12",
+            });
+            await createLeaveRequest({
+                employeeId: employeeOfB.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-11",
+                endDate: "2030-12-12",
+            });
+
+            const hrAAgent = await loginAs(hrA);
+            const response = await hrAAgent.get("/api/leave-requests/team");
+
+            expect(response.body.data).toHaveLength(1);
+            expect(response.body.data[0].employee_id).toBe(employeeOfA.id);
+        });
+
+        it("returns an empty list, not a 403, for a plain employee with no reports and no active delegation", async () => {
+            // Not role-gated at the route (see leaveRequestRoutes.js): an
+            // employee can be nominated as someone's delegate and needs this
+            // same endpoint to see the delegated team while active — see the
+            // delegation describe block below. An ordinary employee with
+            // neither reports nor a delegation just gets [] back.
             const employee = await createUser({ email: "list-employee-team@example.com" });
             const agent = await loginAs(employee);
             const response = await agent.get("/api/leave-requests/team");
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data).toEqual([]);
+        });
+
+        it("merges a currently-delegated manager's team into the delegate's own team list", async () => {
+            const manager = await createUser({ role: "MANAGER", email: "list-delegating-mgr@example.com" });
+            const delegateEmployee = await createUser({ email: "list-delegate-emp@example.com" });
+            const employeeOfManager = await createUser({
+                role: "EMPLOYEE",
+                managerId: manager.id,
+                email: "list-emp-of-delegating-mgr@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Delegated Team Listing Leave", annualEntitlement: 10 });
+            await createLeaveRequest({
+                employeeId: employeeOfManager.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-09",
+                endDate: "2030-12-10",
+            });
+
+            // Dated around today (unlike this file's usual 2030 dates) since
+            // "currently delegated" is evaluated against the real clock, not
+            // the leave request's own dates.
+            const today = new Date().toISOString().slice(0, 10);
+            await createDelegation({ managerId: manager.id, delegateId: delegateEmployee.id, startDate: today, endDate: today });
+
+            const delegateAgent = await loginAs(delegateEmployee);
+            const response = await delegateAgent.get("/api/leave-requests/team");
+            expect(response.body.data).toHaveLength(1);
+            expect(response.body.data[0].employee_id).toBe(employeeOfManager.id);
+            expect(response.body.data[0].manager_first_name).toBe(manager.first_name);
+        });
+    });
+
+    describe("all requests (HR company-wide view)", () => {
+        it("shows an HR admin every request in the company, including other HR admins' branches", async () => {
+            const hrA = await createRootHr({ email: "all-hrA@example.com" });
+            const hrB = await createRootHr({ email: "all-hrB@example.com" });
+            const managerOfA = await createUser({ role: "MANAGER", managerId: hrA.id, email: "all-mgr-of-hrA@example.com" });
+            const managerOfB = await createUser({ role: "MANAGER", managerId: hrB.id, email: "all-mgr-of-hrB@example.com" });
+            const employeeOfA = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfA.id,
+                email: "all-emp-of-hrA@example.com",
+            });
+            const employeeOfB = await createUser({
+                role: "EMPLOYEE",
+                managerId: managerOfB.id,
+                email: "all-emp-of-hrB@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "All Requests Leave", annualEntitlement: 10 });
+            await createLeaveRequest({
+                employeeId: employeeOfA.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-15",
+                endDate: "2030-12-16",
+            });
+            await createLeaveRequest({
+                employeeId: employeeOfB.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-15",
+                endDate: "2030-12-16",
+            });
+
+            const hrAAgent = await loginAs(hrA);
+            const response = await hrAAgent.get("/api/leave-requests/all");
+
+            expect(response.statusCode).toBe(200);
+            const employeeIds = response.body.data.map((request) => request.employee_id);
+            expect(employeeIds).toEqual(expect.arrayContaining([employeeOfA.id, employeeOfB.id]));
+        });
+
+        it("rejects a non-HR caller — a manager only ever gets their own branch via /team, never company-wide", async () => {
+            const manager = await createUser({ role: "MANAGER", email: "all-nonhr-mgr@example.com" });
+            const agent = await loginAs(manager);
+
+            const response = await agent.get("/api/leave-requests/all");
+
             expect(response.statusCode).toBe(403);
         });
     });

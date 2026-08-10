@@ -7,23 +7,32 @@
 // single-row layout were unreadable/cramped once a row could carry up to
 // four actions plus a role badge.
 import { useState } from "react";
-import { Check, Info, ShieldCheck, ShieldX, X } from "lucide-react";
+import { Check, Info, Repeat, ShieldCheck, ShieldX, X } from "lucide-react";
 import { approveLeaveRequest, rejectLeaveRequest, overrideLeaveRequest } from "../../services/leaveRequestService.js";
 import { toErrorMessage } from "../../services/httpError.js";
+import { useAuth } from "../../hooks/useAuth.js";
 import { Card } from "../ui/Card.jsx";
 import { Button } from "../ui/Button.jsx";
-import { RoleBadge, StatusBadge } from "../ui/Badge.jsx";
+import { Badge, RoleBadge, StatusBadge } from "../ui/Badge.jsx";
 import { RequestDetailModal } from "./RequestDetailModal.jsx";
 import { formatDateRange } from "../../utils/dates.js";
 
-function RequestRow({ request, canOverride, onChanged, onViewDetails }) {
+function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, readOnly = false }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
     const [showRejectComment, setShowRejectComment] = useState(false);
     const [comment, setComment] = useState("");
 
-    const isPending = request.status === "SUBMITTED";
+    const isPending = !readOnly && request.status === "SUBMITTED";
     const workingDays = Number(request.working_days);
+    // This list can now include a manager's team the viewer is only
+    // standing in for as an active delegate (listTeamLeaveRequests merges
+    // it in) alongside the viewer's own reports — flag those rows so it's
+    // clear why an unfamiliar employee's request is showing up here.
+    // Not shown in read-only mode (the HR "All Requests" tab): there, every
+    // row's manager differs from the viewer as a matter of course, so the
+    // badge would just be noise rather than flagging anything unusual.
+    const isDelegatedRow = !readOnly && request.employee_manager_id && request.employee_manager_id !== viewerId;
 
     // `setBusy(false)` must run on both paths — previously it only ran in
     // the `catch`, so a *successful* approve/reject/override left the row's
@@ -56,6 +65,12 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails }) {
                         </span>
                         <RoleBadge role={request.employee_role} />
                         <StatusBadge status={request.status} />
+                        {isDelegatedRow && (
+                            <Badge className="flex items-center gap-1 bg-amber-100 text-amber-700">
+                                <Repeat className="h-3 w-3" aria-hidden="true" />
+                                Delegated for {request.manager_first_name} {request.manager_last_name}
+                            </Badge>
+                        )}
                     </div>
                     <p className="mt-0.5 text-xs text-slate-500">
                         {request.leave_type_name} · {formatDateRange(request.start_date, request.end_date)} · {workingDays} day
@@ -92,7 +107,7 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails }) {
                             </Button>
                         </>
                     )}
-                    {canOverride && request.status === "APPROVED" && (
+                    {!readOnly && canOverride && request.status === "APPROVED" && (
                         <Button
                             icon={ShieldX}
                             variant="danger"
@@ -103,7 +118,7 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails }) {
                             Override to rejected
                         </Button>
                     )}
-                    {canOverride && request.status === "REJECTED" && (
+                    {!readOnly && canOverride && request.status === "REJECTED" && (
                         <Button
                             icon={ShieldCheck}
                             variant="success"
@@ -142,7 +157,16 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails }) {
     );
 }
 
-export function TeamRequestList({ requests, canOverride, onChanged }) {
+// `readOnly`: the HR "All Requests" tab — every request in the company for
+// browsing/context, but acting on one is scoped to the caller's own
+// reporting subtree (enforced server-side regardless), so this tab shows no
+// action buttons at all rather than showing buttons that would just 404 for
+// most rows. Switch to "My Team" to actually act on something.
+export function TeamRequestList({ requests, canOverride, onChanged, readOnly = false }) {
+    // Optional chaining: some callers/tests render this before the auth
+    // context has a user — the delegated-team badge just stays hidden then,
+    // same as if every row were the viewer's own report.
+    const { user } = useAuth();
     const [detailRequest, setDetailRequest] = useState(null);
 
     return (
@@ -155,6 +179,8 @@ export function TeamRequestList({ requests, canOverride, onChanged }) {
                         canOverride={canOverride}
                         onChanged={onChanged}
                         onViewDetails={setDetailRequest}
+                        viewerId={user?.id}
+                        readOnly={readOnly}
                     />
                 ))}
             </ul>

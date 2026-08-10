@@ -27,14 +27,24 @@ router.post("/preview", validateBody(previewLeaveRequestSchema), controller.prev
 // it's what turns the multipart body into req.body in the first place.
 router.post("/", uploadLeaveRequestDocument, validateBody(submitLeaveRequestSchema), controller.submit);
 router.get("/mine", controller.listMine);
-// A plain role check is correct here — "can you see a team-scoped list at
-// all" is a role question; which specific requests are in it is decided
-// inside the service (HR sees everyone's, a manager only their reports').
-router.get("/team", requireRole("MANAGER", "HR_ADMIN"), controller.listTeam);
+// No role gate here (unlike most other team/HR-scoped routes): a plain
+// EMPLOYEE can be nominated as someone's delegate (see delegationRoutes.js),
+// and needs to see that manager's team here too while the delegation window
+// is active. The service scopes the actual result — direct reports, plus
+// any currently-delegated team, plus everything for HR — so an ordinary
+// employee with neither just gets back an empty list, not a 403.
+router.get("/team", controller.listTeam);
+// HR's company-wide "All Requests" view (read-only from the UI's own
+// perspective — see listAllLeaveRequests). A plain role check is correct
+// here, same reasoning as most other team/HR-scoped routes: "can you see
+// the whole company's requests at all" is a role question, not a
+// per-record one.
+router.get("/all", requireRole("HR_ADMIN"), controller.listAll);
 
 router.get("/:id", validateParams(leaveRequestIdParamSchema), controller.getOne);
 router.get("/:id/audit", validateParams(leaveRequestIdParamSchema), controller.getAuditTrail);
 router.get("/:id/document", validateParams(leaveRequestIdParamSchema), controller.getDocument);
+router.get("/:id/document/download", validateParams(leaveRequestIdParamSchema), controller.downloadDocument);
 
 // approve/reject/withdraw/cancel have no route-level role check at all —
 // NFR-1 requires checking against the *specific record*, not just "are you
@@ -45,8 +55,11 @@ router.post("/:id/reject", validateParams(leaveRequestIdParamSchema), validateBo
 router.post("/:id/withdraw", validateParams(leaveRequestIdParamSchema), validateBody(decisionSchema), controller.withdraw);
 router.post("/:id/cancel", validateParams(leaveRequestIdParamSchema), validateBody(decisionSchema), controller.cancel);
 
-// Overriding *is* a pure role check — any HR admin may override any request,
-// unscoped by team.
+// The route-level check is a pure role gate (must be *some* HR admin at
+// all) — but unlike a plain role check, it's not the whole story: which
+// requests a given HR admin can actually override is scoped to their own
+// reporting subtree inside decideLeaveRequest/resolveActingCapacity, the
+// same row-level check approve/reject already goes through.
 router.post(
     "/:id/override",
     requireRole("HR_ADMIN"),

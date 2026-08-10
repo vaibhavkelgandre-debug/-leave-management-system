@@ -44,6 +44,13 @@ function App() {
 
                     <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} />}>
                         <Route path="team" element={<TeamPage />} />
+                    </Route>
+
+                    {/* A plain EMPLOYEE who is currently someone's active
+                        delegate also needs this page — see RequireRole.jsx. */}
+                    <Route
+                        element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} alsoAllowIfActiveDelegate />}
+                    >
                         <Route path="approvals" element={<ApprovalsPage />} />
                     </Route>
 

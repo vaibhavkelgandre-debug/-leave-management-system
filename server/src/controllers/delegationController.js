@@ -22,3 +22,12 @@ export async function listMine(req, res, next) {
         next(error);
     }
 }
+
+export async function listAsDelegate(req, res, next) {
+    try {
+        const delegations = await delegationService.listDelegationsForDelegate(req.user.id);
+        sendSuccess(res, 200, "Delegations retrieved", delegations);
+    } catch (error) {
+        next(error);
+    }
+}

@@ -19,6 +19,13 @@ const BASE_COLUMNS = `id, employee_id, leave_type_id, start_date, end_date, star
 // `employee_role` lets the team/approvals view show a role badge next to the
 // employee's name (HR sees everyone's requests, so the role isn't otherwise
 // obvious from that list alone).
+// `manager_first_name`/`manager_last_name` (the employee's manager, not
+// `decider`) let the approvals view label a row "covering for X" when it
+// belongs to a manager other than the viewer themself — the team list can
+// now include a manager's team the viewer is only standing in for as an
+// active delegate (see leaveRequestService.listTeamLeaveRequests), so
+// `employee_manager_id` alone isn't enough for the UI to explain why an
+// unfamiliar employee's request is showing up in someone else's list.
 const JOINED_COLUMNS = `
     lr.id, lr.employee_id, lr.leave_type_id, lt.name AS leave_type_name,
     lr.start_date, lr.end_date, lr.start_half_day, lr.end_half_day, lr.working_days,
@@ -26,6 +33,7 @@ const JOINED_COLUMNS = `
     lr.created_at, lr.updated_at,
     u.first_name AS employee_first_name, u.last_name AS employee_last_name, u.manager_id AS employee_manager_id,
     employee_role.role_name AS employee_role,
+    manager.first_name AS manager_first_name, manager.last_name AS manager_last_name,
     decider.first_name AS decided_by_first_name, decider.last_name AS decided_by_last_name,
     EXISTS (SELECT 1 FROM leave_request_documents lrd WHERE lrd.leave_request_id = lr.id) AS has_document
 `;
@@ -33,6 +41,7 @@ const JOINED_FROM = `FROM leave_requests lr
     JOIN leave_types lt ON lt.id = lr.leave_type_id
     JOIN users u ON u.id = lr.employee_id
     JOIN roles employee_role ON employee_role.id = u.role_id
+    LEFT JOIN users manager ON manager.id = u.manager_id
     LEFT JOIN users decider ON decider.id = lr.decided_by`;
 
 // Input: the submission fields (employeeId/leaveTypeId/dates/flags/workingDays/reason).
@@ -78,22 +87,30 @@ export async function findLeaveRequestsForEmployee(employeeId) {
 
 // Input: an array of employee ids (a manager's direct reports). Output: all
 // of their requests, newest-submitted first — used for the manager approvals
-// view. Returns [] without a query for an empty list, since `= ANY('{}')`
-// would otherwise need special-casing.
+// view. Excludes WITHDRAWN: once an employee withdraws their own request
+// there's nothing left for a manager/HR to act on, so it shouldn't linger in
+// their approvals list. Returns [] without a query for an empty list, since
+// `= ANY('{}')` would otherwise need special-casing.
 export async function findLeaveRequestsForEmployees(employeeIds) {
     if (employeeIds.length === 0) {
         return [];
     }
     const result = await pool.query(
-        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} WHERE lr.employee_id = ANY($1::uuid[]) ORDER BY lr.created_at DESC`,
+        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM}
+         WHERE lr.employee_id = ANY($1::uuid[]) AND lr.status <> 'WITHDRAWN'
+         ORDER BY lr.created_at DESC`,
         [employeeIds]
     );
     return result.rows;
 }
 
-// Output: every leave request in the system — HR's view, unscoped.
+// Output: every leave request in the system — HR's view, unscoped by team but
+// still excludes WITHDRAWN for the same reason as findLeaveRequestsForEmployees
+// above.
 export async function findAllLeaveRequests() {
-    const result = await pool.query(`SELECT ${JOINED_COLUMNS} ${JOINED_FROM} ORDER BY lr.created_at DESC`);
+    const result = await pool.query(
+        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} WHERE lr.status <> 'WITHDRAWN' ORDER BY lr.created_at DESC`
+    );
     return result.rows;
 }
 
