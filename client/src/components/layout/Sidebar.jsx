@@ -1,0 +1,92 @@
+// The app's primary navigation shell: a persistent, collapsible column on
+// desktop (`lg:` and up) and an off-canvas drawer below that, both wrapping
+// the same NavBar link data so role-based visibility only has to be defined
+// once. AppLayout.jsx owns `collapsed`/`mobileOpen` state and passes it down.
+import { useEffect } from "react";
+import { Link } from "react-router-dom";
+import { PanelLeftClose, PanelLeftOpen, X } from "lucide-react";
+import { NavBar } from "./NavBar.jsx";
+
+// Closes the mobile drawer on Escape. Unlike Modal.jsx's focus-on-open effect
+// (which had to be split from its Escape effect to avoid stealing focus from
+// a form input on every keystroke — see rules.md), the sidebar never
+// programmatically moves focus on open, so there's no equivalent risk here
+// and a single effect is enough.
+function useCloseOnEscape(active, onClose) {
+    useEffect(() => {
+        if (!active) return undefined;
+
+        function handleKeyDown(event) {
+            if (event.key === "Escape") onClose();
+        }
+
+        document.addEventListener("keydown", handleKeyDown);
+        return () => document.removeEventListener("keydown", handleKeyDown);
+    }, [active, onClose]);
+}
+
+export function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile }) {
+    useCloseOnEscape(mobileOpen, onCloseMobile);
+
+    return (
+        <>
+            {/* Mobile-only backdrop — a persistent desktop sidebar has no overlay. */}
+            <div
+                className={`fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-sm transition-opacity lg:hidden ${
+                    mobileOpen ? "opacity-100" : "pointer-events-none opacity-0"
+                }`}
+                aria-hidden="true"
+                onClick={onCloseMobile}
+            />
+
+            <aside
+                className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-slate-200 bg-white transition-transform duration-200 lg:sticky lg:top-0 lg:h-screen lg:translate-x-0 ${
+                    mobileOpen ? "translate-x-0" : "-translate-x-full"
+                } ${collapsed ? "lg:w-20" : "lg:w-64"}`}
+            >
+                <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 px-4">
+                    <Link to="/dashboard" className="flex items-center gap-2 overflow-hidden" onClick={onCloseMobile}>
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-sm font-bold text-white shadow-sm">
+                            L
+                        </span>
+                        {!collapsed && (
+                            <span className="truncate bg-gradient-to-r from-indigo-600 to-violet-600 bg-clip-text text-lg font-bold text-transparent">
+                                LMS
+                            </span>
+                        )}
+                    </Link>
+                    <button
+                        type="button"
+                        onClick={onCloseMobile}
+                        aria-label="Close menu"
+                        className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600 lg:hidden"
+                    >
+                        <X className="h-5 w-5" aria-hidden="true" />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto px-3 py-4">
+                    <NavBar collapsed={collapsed} onNavigate={onCloseMobile} />
+                </div>
+
+                <div className="hidden shrink-0 border-t border-slate-100 p-3 lg:block">
+                    <button
+                        type="button"
+                        onClick={onToggleCollapse}
+                        aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                        className="flex w-full items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium text-slate-500 hover:bg-slate-100 hover:text-slate-700"
+                    >
+                        {collapsed ? (
+                            <PanelLeftOpen className="h-4 w-4 shrink-0" aria-hidden="true" />
+                        ) : (
+                            <>
+                                <PanelLeftClose className="h-4 w-4 shrink-0" aria-hidden="true" />
+                                <span>Collapse</span>
+                            </>
+                        )}
+                    </button>
+                </div>
+            </aside>
+        </>
+    );
+}

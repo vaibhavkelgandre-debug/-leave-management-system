@@ -1,8 +1,8 @@
 // Dashboard tile: what a manager (or HR) can act on right now — pending
-// approvals, who's on leave today from their scope, and team headcount.
-// getTeamLeaveRequests() is already scoped server-side (direct reports for a
-// manager, everyone for HR), so this component doesn't need to know which
-// role it's rendering for.
+// approvals count + review link, who's on approved leave today, team
+// headcount. getTeamLeaveRequests() is already scoped server-side (direct
+// reports for a manager, everyone for HR), so this component doesn't need
+// to know which role it's rendering for.
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Users } from "lucide-react";
