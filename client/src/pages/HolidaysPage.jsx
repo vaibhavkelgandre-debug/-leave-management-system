@@ -31,6 +31,10 @@ export function HolidaysPage() {
     // null while adding; the holiday being changed while editing.
     const [editingHoliday, setEditingHoliday] = useState(null);
 
+    // Set when a holiday's dot is clicked on the calendar, so the matching
+    // row can be highlighted and scrolled into view in the list beside it.
+    const [selectedHolidayId, setSelectedHolidayId] = useState(null);
+
     // Bumped after a mutation to re-trigger the fetch effect.
     const [reloadToken, setReloadToken] = useState(0);
     const reload = () => setReloadToken((token) => token + 1);
@@ -74,6 +78,12 @@ export function HolidaysPage() {
     function closeForm() {
         setShowForm(false);
         setEditingHoliday(null);
+    }
+
+    // Clicking an already-selected dot again deselects it, instead of the
+    // amber ring getting stuck highlighted with no way to clear it.
+    function toggleSelectedHoliday(holidayId) {
+        setSelectedHolidayId((current) => (current === holidayId ? null : holidayId));
     }
 
     function handleSaved(savedStartDate) {
@@ -120,51 +130,56 @@ export function HolidaysPage() {
                 </p>
             )}
 
-            <section className="mt-6">
-                <HolidayCalendar
-                    holidays={loading ? [] : holidays}
-                    onActiveYearChange={setViewYear}
-                    focusDate={focusDate}
-                />
-            </section>
+            <div className="mt-6 grid gap-6 lg:grid-cols-[380px_1fr] lg:items-start">
+                <section className="lg:sticky lg:top-20">
+                    <HolidayCalendar
+                        holidays={loading ? [] : holidays}
+                        onActiveYearChange={setViewYear}
+                        focusDate={focusDate}
+                        selectedHolidayId={selectedHolidayId}
+                        onSelectHoliday={toggleSelectedHoliday}
+                    />
+                </section>
 
-            <section className="mt-8">
-                <div className="flex items-baseline justify-between gap-3">
-                    <h2 className="text-lg font-semibold text-slate-900">All holidays in {viewYear}</h2>
-                    {!loading && !loadError && holidays.length > 0 && (
-                        <span className="text-xs text-slate-500">
-                            {holidays.length} {holidays.length === 1 ? "holiday" : "holidays"}
-                        </span>
-                    )}
-                </div>
-
-                {loading && (
-                    <p role="status" className="mt-2 text-sm text-slate-500">
-                        Loading…
-                    </p>
-                )}
-                {!loading && !loadError && holidays.length === 0 && (
-                    <Card className="mt-4 flex flex-col items-center gap-2 p-10 text-center">
-                        <CalendarOff className="h-7 w-7 text-slate-300" aria-hidden="true" />
-                        <p className="text-sm text-slate-500">No holidays recorded for {viewYear}.</p>
-                        {canManage && (
-                            <Button variant="secondary" size="sm" icon={Plus} onClick={openAddForm}>
-                                Add the first one
-                            </Button>
+                <section>
+                    <div className="flex items-baseline justify-between gap-3">
+                        <h2 className="text-lg font-semibold text-slate-900">All holidays in {viewYear}</h2>
+                        {!loading && !loadError && holidays.length > 0 && (
+                            <span className="text-xs text-slate-500">
+                                {holidays.length} {holidays.length === 1 ? "holiday" : "holidays"}
+                            </span>
                         )}
-                    </Card>
-                )}
-                {!loading && !loadError && holidays.length > 0 && (
-                    <div className="mt-4">
-                        <HolidayList
-                            holidays={holidays}
-                            canManage={canManage}
-                            onEdit={openEditForm}
-                            onChanged={reload}
-                        />
                     </div>
-                )}
-            </section>
+
+                    {loading && (
+                        <p role="status" className="mt-2 text-sm text-slate-500">
+                            Loading…
+                        </p>
+                    )}
+                    {!loading && !loadError && holidays.length === 0 && (
+                        <Card className="mt-4 flex flex-col items-center gap-2 p-10 text-center">
+                            <CalendarOff className="h-7 w-7 text-slate-300" aria-hidden="true" />
+                            <p className="text-sm text-slate-500">No holidays recorded for {viewYear}.</p>
+                            {canManage && (
+                                <Button variant="secondary" size="sm" icon={Plus} onClick={openAddForm}>
+                                    Add the first one
+                                </Button>
+                            )}
+                        </Card>
+                    )}
+                    {!loading && !loadError && holidays.length > 0 && (
+                        <div className="mt-4">
+                            <HolidayList
+                                holidays={holidays}
+                                canManage={canManage}
+                                onEdit={openEditForm}
+                                onChanged={reload}
+                                selectedHolidayId={selectedHolidayId}
+                            />
+                        </div>
+                    )}
+                </section>
+            </div>
         </div>
     );
 }

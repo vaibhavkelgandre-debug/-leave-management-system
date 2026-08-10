@@ -36,9 +36,12 @@ const FC_COMPACT_CLASSES = [
     // FullCalendar tags cells "fc-day-sat"/"fc-day-sun", not "fc-day-weekend".
     "[&_.fc-day-sat]:!bg-slate-50 [&_.fc-day-sun]:!bg-slate-50",
     "[&_.fc-day-sat_.fc-daygrid-day-number]:!text-slate-400 [&_.fc-day-sun_.fc-daygrid-day-number]:!text-slate-400",
+    // Signals the holiday dots are clickable (they select the matching row
+    // in the list next to the calendar).
+    "[&_.fc-daygrid-event]:!cursor-pointer",
 ].join(" ");
 
-export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
+export function HolidayCalendar({ holidays, onActiveYearChange, focusDate, selectedHolidayId, onSelectHoliday }) {
     const calendarRef = useRef(null);
     // Avoids re-notifying the parent for every render of the same month —
     // `datesSet` fires on more than just year changes (any nav, resize, etc.).
@@ -58,6 +61,11 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
     // nothing on the days that follow.
     const events = holidays.flatMap((holiday) => {
         const rangeLabel = formatDateRange(holiday.start_date, holiday.end_date);
+        // Amber instead of the usual indigo dot flags the holiday currently
+        // selected from the list next to the calendar, so the link between
+        // the two panels reads at a glance.
+        const isSelected = holiday.id === selectedHolidayId;
+        const color = isSelected ? "#f59e0b" : HOLIDAY_COLOR;
 
         return eachDateKeyInRange(holiday.start_date, holiday.end_date).map((dateKey) => ({
             id: `${holiday.id}-${dateKey}`,
@@ -65,10 +73,10 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
             start: dateKey,
             allDay: true,
             display: "list-item",
-            backgroundColor: HOLIDAY_COLOR,
-            borderColor: HOLIDAY_COLOR,
+            backgroundColor: color,
+            borderColor: color,
             textColor: "#ffffff",
-            extendedProps: { rangeLabel },
+            extendedProps: { rangeLabel, holidayId: holiday.id },
         }));
     });
 
@@ -93,27 +101,30 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate }) {
         info.el.setAttribute("aria-label", label);
     }
 
+    function handleEventClick(info) {
+        onSelectHoliday?.(info.event.extendedProps.holidayId);
+    }
+
     return (
-        <div
-            className={`mx-auto max-w-sm rounded-xl border border-slate-200 bg-white p-4 shadow-sm ${FC_COMPACT_CLASSES}`}
-        >
+        <div className={`w-full rounded-xl border border-slate-200 bg-white p-4 shadow-sm ${FC_COMPACT_CLASSES}`}>
             <FullCalendar
                 ref={calendarRef}
                 plugins={[dayGridPlugin]}
                 initialView="dayGridMonth"
                 headerToolbar={{ left: "prev", center: "title", right: "next" }}
                 dayHeaderFormat={{ weekday: "short" }}
-                aspectRatio={1.5}
+                aspectRatio={1.15}
                 firstDay={1}
                 events={events}
                 eventDidMount={handleEventDidMount}
+                eventClick={handleEventClick}
                 datesSet={handleDatesSet}
             />
 
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">
                     <span className="h-2 w-2 rounded-full" style={{ backgroundColor: HOLIDAY_COLOR }} />
-                    Holiday — hover the dot for its name and dates
+                    Holiday — click a dot to find it in the list
                 </span>
                 <span className="flex items-center gap-1.5">
                     <span className="h-2.5 w-2.5 rounded border border-slate-200 bg-slate-50" />

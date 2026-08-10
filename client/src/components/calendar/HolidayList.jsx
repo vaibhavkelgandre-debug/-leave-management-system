@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Pencil, Trash2 } from "lucide-react";
 import { deleteHoliday } from "../../services/holidayService.js";
 import { toErrorMessage } from "../../services/httpError.js";
@@ -33,7 +33,7 @@ function DateChip({ startDate, endDate, isPast }) {
     );
 }
 
-function HolidayItem({ holiday, canManage, onEdit, onChanged }) {
+function HolidayItem({ holiday, canManage, onEdit, onChanged, isSelected, registerRef }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
@@ -54,7 +54,12 @@ function HolidayItem({ holiday, canManage, onEdit, onChanged }) {
     }
 
     return (
-        <li className="flex items-center gap-4 px-4 py-3 transition hover:bg-slate-50/80">
+        <li
+            ref={registerRef}
+            className={`flex items-center gap-4 px-4 py-3 transition ${
+                isSelected ? "bg-amber-50/80 ring-1 ring-inset ring-amber-300" : "hover:bg-slate-50/80"
+            }`}
+        >
             <DateChip startDate={holiday.start_date} endDate={holiday.end_date} isPast={isPast} />
 
             <div className="min-w-0 flex-1">
@@ -97,7 +102,18 @@ function HolidayItem({ holiday, canManage, onEdit, onChanged }) {
     );
 }
 
-export function HolidayList({ holidays, canManage, onEdit, onChanged }) {
+export function HolidayList({ holidays, canManage, onEdit, onChanged, selectedHolidayId }) {
+    const itemNodes = useRef(new Map());
+
+    // Scrolls the row picked from the calendar into view — the row itself is
+    // already visible as "selected" via `isSelected` below without this, but
+    // on a long list it can sit off-screen with no scroll container of its
+    // own (the whole page scrolls), so it needs an explicit nudge.
+    useEffect(() => {
+        if (!selectedHolidayId) return;
+        itemNodes.current.get(selectedHolidayId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [selectedHolidayId]);
+
     return (
         <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
@@ -108,6 +124,11 @@ export function HolidayList({ holidays, canManage, onEdit, onChanged }) {
                         canManage={canManage}
                         onEdit={onEdit}
                         onChanged={onChanged}
+                        isSelected={holiday.id === selectedHolidayId}
+                        registerRef={(node) => {
+                            if (node) itemNodes.current.set(holiday.id, node);
+                            else itemNodes.current.delete(holiday.id);
+                        }}
                     />
                 ))}
             </ul>
