@@ -2,9 +2,12 @@
 // endpoints (invites, role/manager assignment, activation status).
 import { z } from "zod";
 
-// Validates the payload for inviting a new employee, and enforces the org-chart
-// rule that only EMPLOYEE/MANAGER roles have a manager and HR_ADMIN never does —
-// keeping the reporting hierarchy consistent at creation time rather than in the DB.
+// Validates the payload for inviting a new employee, and enforces that
+// EMPLOYEE and HR_ADMIN both require a managerId at creation time (a MANAGER
+// may be created without one, unchanged) — the actual role-compatibility
+// check (who's an allowed manager for which target role) lives in
+// reportingService.assertManagerAllowed, not here, so it stays in one place
+// for both invite and reassignment.
 export const inviteEmployeeSchema = z
     .object({
         firstName: z.string().trim().min(1, "First name is required"),
@@ -21,11 +24,15 @@ export const inviteEmployeeSchema = z
                 message: "managerId is required for employees",
             });
         }
-        if (data.role === "HR_ADMIN" && data.managerId) {
+        if (data.role === "HR_ADMIN" && !data.managerId) {
             ctx.addIssue({
                 code: "custom",
                 path: ["managerId"],
-                message: "HR_ADMIN accounts cannot have a manager",
+                // A new HR admin reports to whichever existing HR admin
+                // created them (see reportingService.js) — the root
+                // HR_ADMIN(s) with no manager at all only ever come from
+                // POST /auth/register/hr, not this invite flow.
+                message: "managerId is required for HR admins",
             });
         }
     });

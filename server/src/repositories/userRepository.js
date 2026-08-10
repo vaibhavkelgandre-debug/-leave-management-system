@@ -1,5 +1,13 @@
 import pool from "../config/db.js";
 
+// `invited_by` is a scalar subquery, not a JOIN, so a user with more than one
+// invitations row (not possible today — there's no resend/re-invite feature
+// yet — but defensive regardless) can never multiply this user into extra
+// rows the way a LEFT JOIN would. `ORDER BY created_at ASC LIMIT 1` picks the
+// original invite if that ever changes. NULL for anyone who registered
+// through a path with no invitation row at all (the root HR_ADMIN via
+// POST /auth/register/hr) — used by userService.changeManager to restrict
+// who may edit an HR_ADMIN's own reporting line to whoever created them.
 const PUBLIC_USER_COLUMNS = `
     u.id,
     u.first_name,
@@ -10,7 +18,8 @@ const PUBLIC_USER_COLUMNS = `
     u.department_id,
     u.status,
     u.created_at,
-    u.updated_at
+    u.updated_at,
+    (SELECT i.invited_by FROM invitations i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1) AS invited_by
 `;
 
 export async function findAllUsers() {

@@ -32,9 +32,17 @@ describe("PATCH /api/users/:id/manager (hierarchy & cycle prevention)", () => {
         expect(response.body.data.manager_id).toBe(m2.id);
     });
 
-    it("rejects assigning a manager to an HR_ADMIN account", async () => {
+    it("rejects assigning a MANAGER as an HR_ADMIN's manager — it must be another HR_ADMIN", async () => {
         const hr = await createRootHr({ email: "hr-noman@example.com" });
-        const secondHr = await createUser({ email: "hr2-noman@example.com", role: "HR_ADMIN", managerId: null });
+        // `invitedBy: hr.id` so `hr` is the legitimate editor of secondHr's
+        // reporting line — otherwise this would 403 before ever reaching the
+        // role-compatibility check this test is actually about.
+        const secondHr = await createUser({
+            email: "hr2-noman@example.com",
+            role: "HR_ADMIN",
+            managerId: null,
+            invitedBy: hr.id,
+        });
         const manager = await createUser({ email: "mgr-noman@example.com", role: "MANAGER", managerId: hr.id });
 
         const hrAgent = await loginAs(hr);

@@ -68,7 +68,7 @@ describe("Invitation flow (FR-001)", () => {
         expect(response.statusCode).toBe(403);
     });
 
-    it("rejects inviting an HR_ADMIN with a managerId", async () => {
+    it("allows inviting an HR_ADMIN with a managerId pointing to another HR_ADMIN — the new HR reports to whoever created them", async () => {
         const hr = await createRootHr({ email: "hr3@example.com" });
         const hrAgent = await loginAs(hr);
 
@@ -80,10 +80,11 @@ describe("Invitation flow (FR-001)", () => {
             managerId: hr.id,
         });
 
-        expect(response.statusCode).toBe(422);
+        expect(response.statusCode).toBe(201);
+        expect(response.body.data.user.manager_id).toBe(hr.id);
     });
 
-    it("allows inviting an HR_ADMIN with no manager at all", async () => {
+    it("rejects inviting an HR_ADMIN with no managerId at all — it's required, same as for an employee", async () => {
         const hr = await createRootHr({ email: "hr4@example.com" });
         const hrAgent = await loginAs(hr);
 
@@ -94,8 +95,23 @@ describe("Invitation flow (FR-001)", () => {
             role: "HR_ADMIN",
         });
 
-        expect(response.statusCode).toBe(201);
-        expect(response.body.data.user.manager_id).toBeNull();
+        expect(response.statusCode).toBe(422);
+    });
+
+    it("rejects inviting an HR_ADMIN whose manager is a MANAGER, not another HR_ADMIN", async () => {
+        const hr = await createRootHr({ email: "hr7@example.com" });
+        const manager = await createUser({ email: "mgr-for-hr7@example.com", role: "MANAGER", managerId: hr.id });
+        const hrAgent = await loginAs(hr);
+
+        const response = await hrAgent.post("/api/users/invite").send({
+            firstName: "Second",
+            lastName: "Hr",
+            email: "secondhr3@example.com",
+            role: "HR_ADMIN",
+            managerId: manager.id,
+        });
+
+        expect(response.statusCode).toBe(400);
     });
 
     it("rejects inviting a MANAGER whose manager is another MANAGER, not HR", async () => {

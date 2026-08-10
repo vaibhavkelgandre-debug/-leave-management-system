@@ -20,8 +20,11 @@ describe("InviteEmployeeForm", () => {
         vi.clearAllMocks();
     });
 
-    it("asks who each role reports to, except HR admins who report to nobody", async () => {
-        userService.getUsers.mockResolvedValue([makeUser({ role: ROLES.MANAGER })]);
+    it("asks who each role reports to — including an HR admin, who now reports to whoever created them", async () => {
+        userService.getUsers.mockResolvedValue([
+            makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
+            makeUser({ role: ROLES.MANAGER }),
+        ]);
         renderForm();
         await screen.findByLabelText(/first name/i);
 
@@ -33,10 +36,55 @@ describe("InviteEmployeeForm", () => {
         expect(screen.getByLabelText("Reporting HR admin")).toBeInTheDocument();
         expect(screen.queryByLabelText("Manager")).not.toBeInTheDocument();
 
-        // HR admin -> top of the tree, no reporting line at all.
+        // HR admin -> reports to another HR admin (their creator by default).
         await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.HR_ADMIN);
+        expect(screen.getByLabelText("Reports to")).toBeInTheDocument();
         expect(screen.queryByLabelText("Reporting HR admin")).not.toBeInTheDocument();
         expect(screen.queryByLabelText("Manager")).not.toBeInTheDocument();
+    });
+
+    it("defaults the HR admin reporting-line picker to the inviter themself, labeled \"You\"", async () => {
+        userService.getUsers.mockResolvedValue([
+            makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
+            makeUser({ id: "hr-2", first_name: "Amit", role: ROLES.HR_ADMIN }),
+            makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
+        ]);
+        renderForm();
+        await screen.findByLabelText(/first name/i);
+
+        await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.HR_ADMIN);
+
+        const select = screen.getByLabelText("Reports to");
+        expect(select).toHaveValue("hr-viewer");
+        expect(within(select).getByText("You")).toBeInTheDocument();
+        // Only other HR admins are offered, never a manager.
+        expect(within(select).getByText("Amit User")).toBeInTheDocument();
+        expect(within(select).queryByText(/manoj/i)).not.toBeInTheDocument();
+    });
+
+    it("submits an HR admin invite with the picked HR admin as managerId", async () => {
+        userService.getUsers.mockResolvedValue([
+            makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
+            makeUser({ id: "hr-2", first_name: "Amit", role: ROLES.HR_ADMIN }),
+        ]);
+        userService.inviteEmployee.mockResolvedValue({
+            user: makeUser({ id: "new-hr" }),
+            inviteLink: "http://localhost:5173/invite/hr-link",
+        });
+
+        renderForm();
+        await screen.findByLabelText(/first name/i);
+
+        await userEvent.type(screen.getByLabelText(/first name/i), "Second");
+        await userEvent.type(screen.getByLabelText(/last name/i), "Hr");
+        await userEvent.type(screen.getByLabelText(/email/i), "secondhr@example.com");
+        await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.HR_ADMIN);
+        await userEvent.selectOptions(screen.getByLabelText("Reports to"), "hr-2");
+        await userEvent.click(screen.getByRole("button", { name: /^invite$/i }));
+
+        expect(userService.inviteEmployee).toHaveBeenCalledWith(
+            expect.objectContaining({ role: ROLES.HR_ADMIN, managerId: "hr-2" })
+        );
     });
 
     it("offers only HR admins as the reporting line for a new manager", async () => {
@@ -129,7 +177,10 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("copies the invite link to the clipboard", async () => {
-        userService.getUsers.mockResolvedValue([]);
+        // Includes the inviter's own HR record — findAllUsers() always would
+        // in real data, and the HR-admin reporting-line picker defaults to
+        // selecting the inviter themself, which needs a matching option.
+        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-1" }),
             inviteLink: "http://localhost:5173/invite/abc123",
@@ -154,7 +205,10 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("rejects an email the browser would accept but the server won't", async () => {
-        userService.getUsers.mockResolvedValue([]);
+        // Includes the inviter's own HR record — findAllUsers() always would
+        // in real data, and the HR-admin reporting-line picker defaults to
+        // selecting the inviter themself, which needs a matching option.
+        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         renderForm();
         await screen.findByLabelText(/first name/i);
 
@@ -170,7 +224,10 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("shows the server's field-level detail rather than a bare 'Validation failed'", async () => {
-        userService.getUsers.mockResolvedValue([]);
+        // Includes the inviter's own HR record — findAllUsers() always would
+        // in real data, and the HR-admin reporting-line picker defaults to
+        // selecting the inviter themself, which needs a matching option.
+        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockRejectedValue({
             response: {
                 status: 422,
@@ -196,7 +253,10 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("surfaces a failed invite without clearing the form", async () => {
-        userService.getUsers.mockResolvedValue([]);
+        // Includes the inviter's own HR record — findAllUsers() always would
+        // in real data, and the HR-admin reporting-line picker defaults to
+        // selecting the inviter themself, which needs a matching option.
+        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockRejectedValue({
             response: { data: { message: "Email already in use" } },
         });
@@ -207,7 +267,8 @@ describe("InviteEmployeeForm", () => {
         await userEvent.type(screen.getByLabelText(/first name/i), "New");
         await userEvent.type(screen.getByLabelText(/last name/i), "Hire");
         await userEvent.type(screen.getByLabelText(/email/i), "taken@example.com");
-        // HR admin needs no reporting line, keeping this focused on the error path.
+        // HR admin defaults the reporting line to the inviter themself, so
+        // this stays focused on the error path without an extra selection.
         await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.HR_ADMIN);
         await userEvent.click(screen.getByRole("button", { name: /^invite$/i }));
 

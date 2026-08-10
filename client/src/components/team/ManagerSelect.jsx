@@ -3,7 +3,11 @@ const ROLE_GROUP_LABELS = {
     MANAGER: "Managers",
 };
 
-export function ManagerSelect({ id, label, value, onChange, options, allowNone = true, targetRole, required }) {
+// `currentUserId`: labels that option "You" instead of their own name —
+// most relevant when `targetRole` is "HR_ADMIN" (the inviting/editing HR
+// admin themself is almost always the natural default), but harmless to
+// apply everywhere a manager candidate happens to be the viewer.
+export function ManagerSelect({ id, label, value, onChange, options, allowNone = true, targetRole, required, currentUserId }) {
     const grouped = options.reduce((groups, option) => {
         (groups[option.role] ||= []).push(option);
         return groups;
@@ -12,7 +16,9 @@ export function ManagerSelect({ id, label, value, onChange, options, allowNone =
     const helperText =
         targetRole === "MANAGER"
             ? "Managers report directly to an HR admin — pick who they'll answer to."
-            : "Pick the person they'll go to for approvals and questions.";
+            : targetRole === "HR_ADMIN"
+              ? "HR admins report to whichever HR admin created them — pick yourself or another HR admin."
+              : "Pick the person they'll go to for approvals and questions.";
 
     return (
         <div>
@@ -33,7 +39,7 @@ export function ManagerSelect({ id, label, value, onChange, options, allowNone =
                                 <optgroup key={role} label={ROLE_GROUP_LABELS[role]}>
                                     {grouped[role].map((option) => (
                                         <option key={option.id} value={option.id}>
-                                            {option.first_name} {option.last_name}
+                                            {option.id === currentUserId ? "You" : `${option.first_name} ${option.last_name}`}
                                         </option>
                                     ))}
                                 </optgroup>

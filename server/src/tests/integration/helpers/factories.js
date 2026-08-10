@@ -1,5 +1,6 @@
 import { findRoleByName } from "../../../repositories/roleRepository.js";
 import { insertUser } from "../../../repositories/userRepository.js";
+import { insertInvitation } from "../../../repositories/invitationRepository.js";
 import { insertLeaveType } from "../../../repositories/leaveTypeRepository.js";
 import { insertHoliday } from "../../../repositories/holidayRepository.js";
 import { insertDelegation } from "../../../repositories/delegationRepository.js";
@@ -8,6 +9,11 @@ import { hashPassword } from "../../../utils/password.js";
 
 export const DEFAULT_PASSWORD = "Password123!";
 
+// `invitedBy`: when given, backs an `invitations` row for this user so tests
+// can set up "who created this HR admin" (userRepository.js's `invited_by`
+// column, used by userService.changeManager to restrict who may edit an
+// HR_ADMIN's own reporting line) without going through the full HTTP invite
+// flow. A fake unique token is fine — nothing in these tests ever redeems it.
 export async function createUser({
     role = "EMPLOYEE",
     managerId = null,
@@ -16,6 +22,7 @@ export async function createUser({
     email,
     password = DEFAULT_PASSWORD,
     status = "ACTIVE",
+    invitedBy = null,
 } = {}) {
     const roleRecord = await findRoleByName(role);
     const passwordHash = password ? await hashPassword(password) : null;
@@ -29,6 +36,15 @@ export async function createUser({
         managerId,
         status,
     });
+
+    if (invitedBy) {
+        await insertInvitation({
+            userId: user.id,
+            tokenHash: `test-token-${user.id}-${Math.random().toString(36).slice(2)}`,
+            invitedBy,
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000),
+        });
+    }
 
     return { ...user, role, password };
 }

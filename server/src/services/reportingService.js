@@ -3,11 +3,16 @@ import { badRequest, conflict } from "../utils/appError.js";
 
 // Encodes the reporting-line hierarchy rule for the org: an EMPLOYEE may
 // report to a MANAGER or directly to HR_ADMIN, a MANAGER may only report to
-// HR_ADMIN (managers can't report to other managers), and HR_ADMIN has no
-// entry here at all because HR_ADMIN can never have a manager.
+// HR_ADMIN (managers can't report to other managers), and an HR_ADMIN may
+// only report to another HR_ADMIN — specifically whichever HR admin created
+// them, forming a chain (A invites B, B reports to A; B invites C, C reports
+// to B or A, whichever the inviting HR picks — see InviteEmployeeForm.jsx).
+// The root HR_ADMIN(s) who registered via POST /auth/register/hr rather than
+// being invited have no manager at all, same as before this existed.
 const ALLOWED_MANAGER_ROLES = {
     EMPLOYEE: ["MANAGER", "HR_ADMIN"],
     MANAGER: ["HR_ADMIN"],
+    HR_ADMIN: ["HR_ADMIN"],
 };
 
 // Returns everyone under a user in the reporting tree (used for the "my team"
@@ -24,10 +29,6 @@ export async function assertManagerAllowed(targetRole, newManagerId) {
         return null;
     }
 
-    if (targetRole === "HR_ADMIN") {
-        throw badRequest("HR_ADMIN accounts cannot have a manager");
-    }
-
     const manager = await findUserById(newManagerId);
     if (!manager || manager.status === "INACTIVE") {
         throw badRequest("Manager not found");
@@ -38,7 +39,9 @@ export async function assertManagerAllowed(targetRole, newManagerId) {
         throw badRequest(
             targetRole === "MANAGER"
                 ? "A manager's manager must be an HR admin"
-                : "Only a manager or HR admin can be assigned as a manager"
+                : targetRole === "HR_ADMIN"
+                  ? "An HR admin's manager must be another HR admin"
+                  : "Only a manager or HR admin can be assigned as a manager"
         );
     }
 

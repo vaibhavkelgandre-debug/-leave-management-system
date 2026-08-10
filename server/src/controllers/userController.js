@@ -49,7 +49,7 @@ export async function getUserById(req, res, next) {
 // org structure changes.
 export async function updateManager(req, res, next) {
     try {
-        const user = await userService.changeManager(req.params.id, req.body.managerId);
+        const user = await userService.changeManager(req.params.id, req.body.managerId, req.user);
         sendSuccess(res, 200, "Manager updated", user);
     } catch (error) {
         next(error);

@@ -3,6 +3,7 @@ import { Check, Copy } from "lucide-react";
 import { getUsers, inviteEmployee } from "../../services/userService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { isValidEmail } from "../../utils/validation.js";
+import { useAuth } from "../../hooks/useAuth.js";
 import { ROLES } from "../../constants/roles.js";
 import { Button } from "../ui/Button.jsx";
 import { ManagerSelect } from "./ManagerSelect.jsx";
@@ -14,6 +15,7 @@ const inputClasses =
 const labelClasses = "mb-1 block text-sm font-medium text-slate-700";
 
 export function InviteEmployeeForm({ onInvited }) {
+    const { user: currentUser } = useAuth();
     // Only needed to populate the manager dropdown — null until loaded so no
     // setState happens synchronously inside the effect.
     const [users, setUsers] = useState(null);
@@ -49,20 +51,24 @@ export function InviteEmployeeForm({ onInvited }) {
             [name]: value,
             // Who they may report to depends on the role, so a previously picked
             // person can become invalid — clear it rather than submit a bad pair.
-            ...(name === "role" ? { managerId: "" } : {}),
+            // Switching to HR_ADMIN defaults to the inviter themself ("You") —
+            // a new HR admin reports to whoever created them by default, still
+            // changeable to another HR admin below.
+            ...(name === "role" ? { managerId: value === ROLES.HR_ADMIN ? currentUser.id : "" } : {}),
         }));
     }
 
-    // HR admins sit at the top of the tree and have nobody to report to.
-    const needsReportingLine = form.role !== ROLES.HR_ADMIN;
+    // Mirrors the server's hierarchy rule (reportingService.js): an employee
+    // may report to a manager or an HR admin, a manager only to an HR admin,
+    // and an HR admin only to another HR admin.
+    const reportingOptions = (users ?? []).filter((u) => {
+        if (form.role === ROLES.HR_ADMIN) return u.role === ROLES.HR_ADMIN;
+        if (form.role === ROLES.MANAGER) return u.role === ROLES.HR_ADMIN;
+        return u.role !== ROLES.EMPLOYEE;
+    });
 
-    // Mirrors the server's hierarchy rule (reportingService.js): an employee may
-    // report to a manager or an HR admin, but a manager only to an HR admin.
-    const reportingOptions = (users ?? []).filter((u) =>
-        form.role === ROLES.MANAGER ? u.role === ROLES.HR_ADMIN : u.role !== ROLES.EMPLOYEE
-    );
-
-    const reportingLabel = form.role === ROLES.MANAGER ? "Reporting HR admin" : "Manager";
+    const reportingLabel =
+        form.role === ROLES.MANAGER ? "Reporting HR admin" : form.role === ROLES.HR_ADMIN ? "Reports to" : "Manager";
 
     async function handleInvite(event) {
         event.preventDefault();
@@ -80,8 +86,12 @@ export function InviteEmployeeForm({ onInvited }) {
         setSubmitting(true);
 
         try {
-            const payload = needsReportingLine ? form : { ...form, managerId: null };
-            const result = await inviteEmployee(payload);
+            // Every role picks a reporting line now, including HR_ADMIN — an
+            // HR admin's manager must be another HR admin (their creator, by
+            // default). Only the root HR_ADMIN(s), created via the separate
+            // public /register/hr flow rather than this form, ever have no
+            // manager at all.
+            const result = await inviteEmployee(form);
             setInviteResult(result);
             setForm(emptyForm);
             onInvited?.();
@@ -170,23 +180,22 @@ export function InviteEmployeeForm({ onInvited }) {
                     </select>
                 </div>
 
-                {needsReportingLine && (
-                    <div>
-                        <label htmlFor="managerId" className={labelClasses}>
-                            {reportingLabel}
-                        </label>
-                        <ManagerSelect
-                            id="managerId"
-                            label={reportingLabel}
-                            value={form.managerId}
-                            onChange={(event) => setForm((prev) => ({ ...prev, managerId: event.target.value }))}
-                            options={reportingOptions}
-                            targetRole={form.role}
-                            allowNone={false}
-                            required
-                        />
-                    </div>
-                )}
+                <div>
+                    <label htmlFor="managerId" className={labelClasses}>
+                        {reportingLabel}
+                    </label>
+                    <ManagerSelect
+                        id="managerId"
+                        label={reportingLabel}
+                        value={form.managerId}
+                        onChange={(event) => setForm((prev) => ({ ...prev, managerId: event.target.value }))}
+                        options={reportingOptions}
+                        targetRole={form.role}
+                        allowNone={false}
+                        required
+                        currentUserId={currentUser.id}
+                    />
+                </div>
 
                 <Button type="submit" loading={submitting} className="w-full">
                     Invite
