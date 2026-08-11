@@ -56,11 +56,12 @@ export async function updateManager(req, res, next) {
     }
 }
 
-// Activates/deactivates a user account (e.g. offboarding) — passes the acting HR user's
-// id through so the service can record who made the change.
+// Activates/deactivates a user account (e.g. offboarding) — passes the acting HR user
+// through so the service can both record who made the change and check they're the one
+// who created this account in the first place (see changeStatus).
 export async function updateStatus(req, res, next) {
     try {
-        const user = await userService.changeStatus(req.params.id, req.body.status, req.user.id);
+        const user = await userService.changeStatus(req.params.id, req.body.status, req.user);
         sendSuccess(res, 200, "Status updated", user);
     } catch (error) {
         next(error);

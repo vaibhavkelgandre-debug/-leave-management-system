@@ -45,9 +45,9 @@ describe("EmployeesPage", () => {
         expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
     });
 
-    it("lets HR change an employee's manager", async () => {
+    it("lets HR change an employee they created's manager", async () => {
         const manager = makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER });
-        const employee = makeUser({ id: "emp-1", first_name: "Asha", manager_id: "mgr-1" });
+        const employee = makeUser({ id: "emp-1", first_name: "Asha", manager_id: "mgr-1", invited_by: "hr-viewer" });
         userService.getUsers.mockResolvedValue([manager, employee]);
         userService.updateManager.mockResolvedValue({ ...employee, manager_id: "mgr-1" });
 
@@ -62,8 +62,8 @@ describe("EmployeesPage", () => {
         expect(userService.updateManager).toHaveBeenCalledWith("emp-1", "mgr-1");
     });
 
-    it("lets HR deactivate an active employee but not themselves", async () => {
-        const employee = makeUser({ id: "emp-2", first_name: "Kiran", status: "ACTIVE" });
+    it("lets HR deactivate an active employee they created, but not themselves", async () => {
+        const employee = makeUser({ id: "emp-2", first_name: "Kiran", status: "ACTIVE", invited_by: "hr-viewer" });
         userService.getUsers.mockResolvedValue([employee]);
         userService.updateStatus.mockResolvedValue({ ...employee, status: "INACTIVE" });
 
@@ -147,6 +147,23 @@ describe("EmployeesPage", () => {
     });
 
     describe("HR reporting-line edit restriction", () => {
+        it("hides the edit control from an HR admin who didn't create this employee — auth is strict per-team, not company-wide", async () => {
+            const hr = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
+            const otherCreator = makeUser({ id: "hr-other", first_name: "Rahul", role: ROLES.HR_ADMIN });
+            const employee = makeUser({
+                id: "emp-1",
+                first_name: "Zara",
+                manager_id: "hr-other",
+                invited_by: "hr-other",
+            });
+            userService.getUsers.mockResolvedValue([hr, otherCreator, employee]);
+
+            renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
+            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+
+            expect(zaraRow.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+        });
+
         it("lets the HR admin who created another HR admin change who they report to", async () => {
             const hr = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
             const createdHr = makeUser({
@@ -191,6 +208,42 @@ describe("EmployeesPage", () => {
             const amitRow = within((await screen.findByText("Amit User")).closest("li"));
 
             expect(amitRow.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+        });
+    });
+
+    describe("activate/deactivate restriction", () => {
+        it("shows the activate/deactivate control for an employee the viewer created", async () => {
+            const hr = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
+            const employee = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer", invited_by: "hr-viewer" });
+            userService.getUsers.mockResolvedValue([hr, employee]);
+
+            renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
+            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+
+            expect(zaraRow.getByRole("button", { name: /deactivate/i })).toBeInTheDocument();
+        });
+
+        it("hides the activate/deactivate control from an HR admin who didn't create this employee", async () => {
+            const hr = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
+            const otherCreator = makeUser({ id: "hr-other", first_name: "Rahul", role: ROLES.HR_ADMIN });
+            const employee = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-other", invited_by: "hr-other" });
+            userService.getUsers.mockResolvedValue([hr, otherCreator, employee]);
+
+            renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
+            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+
+            expect(zaraRow.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
+        });
+
+        it("hides the activate/deactivate control for an account with no recorded creator, for any HR admin other than themself", async () => {
+            const hr = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
+            const orphan = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer" });
+            userService.getUsers.mockResolvedValue([hr, orphan]);
+
+            renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
+            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+
+            expect(zaraRow.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
         });
     });
 });

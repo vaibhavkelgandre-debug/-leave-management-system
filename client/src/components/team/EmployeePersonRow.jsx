@@ -42,14 +42,18 @@ export function EmployeePersonRow({ user, users, onChanged, showReportsTo = fals
     const fullName = `${user.first_name} ${user.last_name}`;
     const isSelf = user.id === currentUser.id;
     const isActive = user.status === "ACTIVE";
-    // Anyone can be reassigned a manager now (including an HR admin, whose
-    // manager must be another HR admin) — but *editing* an HR admin's own
-    // reporting line is restricted server-side (userService.changeManager)
-    // to whoever created them (`user.invited_by`). A root HR admin who
-    // registered directly (no `invited_by` at all) can't be edited by
+    // Auth is strict per-team: editing anyone's reporting line — not just an
+    // HR admin's — is restricted server-side (userService.changeManager) to
+    // whoever created them (`user.invited_by`), same mechanism as
+    // canEditStatus below. A row with no recorded creator (`invited_by`,
+    // e.g. a root HR admin who registered directly) can't be edited by
     // anyone here — mirrored client-side so the icon doesn't invite a click
     // that would just 403.
-    const canEditManager = user.role === "HR_ADMIN" ? Boolean(user.invited_by) && currentUser.id === user.invited_by : true;
+    const canEditManager = Boolean(user.invited_by) && currentUser.id === user.invited_by;
+    // Activating/deactivating is restricted the same way, for every role —
+    // only whoever created this account may toggle its status. A row with
+    // no recorded creator (`invited_by`) can't be toggled by anyone here.
+    const canEditStatus = Boolean(user.invited_by) && currentUser.id === user.invited_by;
 
     function startEditing() {
         setSelectedManagerId(user.manager_id || "");
@@ -151,7 +155,12 @@ export function EmployeePersonRow({ user, users, onChanged, showReportsTo = fals
                 {canEditManager && !isEditingManager && (
                     <IconButton icon={Pencil} label="Change manager" onClick={startEditing} />
                 )}
-                {user.status !== "INVITED" && (
+                {/* Your own row keeps showing this (disabled) even though
+                    you didn't "create yourself" — deactivating yourself is
+                    already independently blocked below, and hiding it
+                    entirely here would read as a missing control rather
+                    than an intentional one. */}
+                {user.status !== "INVITED" && (isSelf || canEditStatus) && (
                     <IconButton
                         icon={isActive ? UserX : UserCheck}
                         label={isSelf ? "You cannot deactivate your own account" : isActive ? "Deactivate" : "Activate"}

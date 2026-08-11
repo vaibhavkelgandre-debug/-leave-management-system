@@ -11,7 +11,7 @@ import { loginAs } from "./helpers/authHelpers.js";
 describe("PATCH /api/users/:id/manager (hierarchy & cycle prevention)", () => {
     it("rejects self-assignment", async () => {
         const hr = await createRootHr({ email: "hr-self@example.com" });
-        const a = await createUser({ email: "self@example.com", managerId: hr.id });
+        const a = await createUser({ email: "self@example.com", managerId: hr.id, invitedBy: hr.id });
         const hrAgent = await loginAs(hr);
 
         const response = await hrAgent.patch(`/api/users/${a.id}/manager`).send({ managerId: a.id });
@@ -23,7 +23,7 @@ describe("PATCH /api/users/:id/manager (hierarchy & cycle prevention)", () => {
         const hr = await createRootHr({ email: "hr-valid@example.com" });
         const m1 = await createUser({ email: "m1-valid@example.com", role: "MANAGER", managerId: hr.id });
         const m2 = await createUser({ email: "m2-valid@example.com", role: "MANAGER", managerId: hr.id });
-        const employee = await createUser({ email: "emp-valid@example.com", managerId: m1.id });
+        const employee = await createUser({ email: "emp-valid@example.com", managerId: m1.id, invitedBy: hr.id });
 
         const hrAgent = await loginAs(hr);
         const response = await hrAgent.patch(`/api/users/${employee.id}/manager`).send({ managerId: m2.id });
@@ -53,7 +53,7 @@ describe("PATCH /api/users/:id/manager (hierarchy & cycle prevention)", () => {
 
     it("rejects assigning another MANAGER as a manager's manager", async () => {
         const hr = await createRootHr({ email: "hr-mgrmgr@example.com" });
-        const m1 = await createUser({ email: "m1-mgrmgr@example.com", role: "MANAGER", managerId: hr.id });
+        const m1 = await createUser({ email: "m1-mgrmgr@example.com", role: "MANAGER", managerId: hr.id, invitedBy: hr.id });
         const m2 = await createUser({ email: "m2-mgrmgr@example.com", role: "MANAGER", managerId: hr.id });
 
         const hrAgent = await loginAs(hr);
@@ -65,12 +65,24 @@ describe("PATCH /api/users/:id/manager (hierarchy & cycle prevention)", () => {
     it("rejects assigning an EMPLOYEE as another employee's manager", async () => {
         const hr = await createRootHr({ email: "hr-empemp@example.com" });
         const manager = await createUser({ email: "mgr-empemp@example.com", role: "MANAGER", managerId: hr.id });
-        const e1 = await createUser({ email: "e1-empemp@example.com", managerId: manager.id });
+        const e1 = await createUser({ email: "e1-empemp@example.com", managerId: manager.id, invitedBy: hr.id });
         const e2 = await createUser({ email: "e2-empemp@example.com", managerId: manager.id });
 
         const hrAgent = await loginAs(hr);
         const response = await hrAgent.patch(`/api/users/${e1.id}/manager`).send({ managerId: e2.id });
 
         expect(response.statusCode).toBe(400);
+    });
+
+    it("rejects an HR admin who didn't create this employee from reassigning their manager", async () => {
+        const creatorHr = await createRootHr({ email: "hr-scope-creator@example.com" });
+        const otherHr = await createRootHr({ email: "hr-scope-other@example.com" });
+        const manager = await createUser({ email: "mgr-scope@example.com", role: "MANAGER", managerId: creatorHr.id, invitedBy: creatorHr.id });
+        const employee = await createUser({ email: "emp-scope@example.com", managerId: manager.id, invitedBy: creatorHr.id });
+
+        const otherHrAgent = await loginAs(otherHr);
+        const response = await otherHrAgent.patch(`/api/users/${employee.id}/manager`).send({ managerId: otherHr.id });
+
+        expect(response.statusCode).toBe(403);
     });
 });

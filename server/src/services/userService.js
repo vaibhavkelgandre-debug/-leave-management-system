@@ -35,18 +35,22 @@ export async function getUserById(id) {
     return user;
 }
 
-// `actor` is only actually consulted for an HR_ADMIN target: HR's own
-// reporting line can only be edited by whoever created them (`invited_by`,
-// see userRepository.js) — not any other HR admin, even though any HR admin
-// can otherwise see/manage everyone. A target with no `invited_by` at all
-// (a root HR_ADMIN who registered via POST /auth/register/hr) can't be
-// edited by anyone here, same reasoning: there's no legitimate "their own
-// creator" to grant that to. Reassigning a MANAGER/EMPLOYEE's manager is
-// unaffected — any HR_ADMIN still can, as before.
+// Auth is strict per-team, not "any HR admin can manage everyone": a
+// target's reporting line can only be edited by whoever created them
+// (`invited_by`, see userRepository.js), for every role, not just
+// HR_ADMIN — same mechanism and same reasoning as changeStatus below.
+// Without this, an HR admin with no reports of their own (or reports
+// outside a given branch entirely) could still re-parent a completely
+// unrelated team's employees, which is exactly the "any HR admin sees a
+// filtered view of every branch" bug already fixed for FR-024's browse/
+// report tools, just showing up here for the write side of the Employees
+// page instead. A target with no `invited_by` at all (a root HR_ADMIN who
+// registered via POST /auth/register/hr) can't be edited by anyone here,
+// same reasoning: there's no legitimate "their own creator" to grant that to.
 export async function changeManager(id, managerId, actor) {
     const target = await getUserById(id);
 
-    if (target.role === "HR_ADMIN" && actor.id !== target.invited_by) {
+    if (actor.id !== target.invited_by) {
         throw forbidden("Only the HR admin who created this account can change who they report to");
     }
 
@@ -58,9 +62,22 @@ export async function changeManager(id, managerId, actor) {
     return getUserById(id);
 }
 
-export async function changeStatus(id, status, actorId) {
-    if (id === actorId && status === "INACTIVE") {
+// Activating/deactivating a user is restricted to whoever created them
+// (`invited_by`) — same mechanism, and same reasoning, as changeManager's
+// HR_ADMIN restriction above, but applied to every role: any HR admin can
+// still *see* everyone (listUsersFor), just not toggle a status they didn't
+// create. A user with no `invited_by` at all (a root HR_ADMIN registered
+// via POST /auth/register/hr) can't be deactivated by anyone through this
+// endpoint — deliberately, there's no legitimate "their creator" to grant
+// that to, matching changeManager's same edge case.
+export async function changeStatus(id, status, actor) {
+    if (id === actor.id && status === "INACTIVE") {
         throw badRequest("You cannot deactivate your own account");
+    }
+
+    const target = await getUserById(id);
+    if (actor.id !== target.invited_by) {
+        throw forbidden("Only the HR admin who created this account can change its status");
     }
 
     const updated = await updateStatus(id, status);
