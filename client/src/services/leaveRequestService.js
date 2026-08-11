@@ -60,6 +60,34 @@ export async function getAllLeaveRequests() {
     return unwrap(response);
 }
 
+// FR-024: HR's filterable browse view — every filter is optional and
+// resolved server-side (see server/src/repositories/leaveRequestRepository.js
+// findLeaveRequestsFiltered), never a client-side array filter over an
+// already-fetched list. `filters` may include employeeId/leaveTypeId/status/
+// startDate/endDate; axios drops any key whose value is undefined/empty
+// rather than sending it as a literal "undefined" query param.
+export async function getFilteredLeaveRequests(filters = {}) {
+    const response = await apiClient.get("/leave-requests", { params: filters });
+    return unwrap(response);
+}
+
+// FR-024's "leave taken per employee over a period" report, as JSON for an
+// on-screen table. One row per employee with at least one APPROVED request
+// overlapping the period.
+export async function getLeaveTakenReport({ startDate, endDate }) {
+    const response = await apiClient.get("/leave-requests/report", { params: { startDate, endDate } });
+    return unwrap(response);
+}
+
+// A plain URL, not an axios call — meant for an <a href>, same reasoning as
+// getLeaveRequestDocumentDownloadUrl below: the server sets its own
+// Content-Disposition: attachment header, so a normal link navigation is
+// enough to save the file, no JS-driven blob download needed.
+export function getLeaveTakenReportCsvUrl({ startDate, endDate }) {
+    const params = new URLSearchParams({ startDate, endDate });
+    return `${apiClient.defaults.baseURL}/leave-requests/report/csv?${params.toString()}`;
+}
+
 export async function getLeaveRequestAuditTrail(id) {
     const response = await apiClient.get(`/leave-requests/${id}/audit`);
     return unwrap(response);

@@ -1,5 +1,16 @@
 import { NavLink } from "react-router-dom";
-import { CalendarCheck, CalendarPlus, ClipboardCheck, IdCard, LayoutDashboard, Repeat, Sun, Tag, Users } from "lucide-react";
+import {
+    CalendarCheck,
+    CalendarPlus,
+    ClipboardCheck,
+    FileBarChart,
+    IdCard,
+    LayoutDashboard,
+    Repeat,
+    Sun,
+    Tag,
+    Users,
+} from "lucide-react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useActiveDelegation } from "../../hooks/useActiveDelegation.js";
 import { usePendingApprovalsCount } from "../../hooks/usePendingApprovalsCount.js";
@@ -83,6 +94,13 @@ const NAV_GROUPS = [
                 label: "Leave Types",
                 description: "Entitlements, accrual rules and document requirements",
                 icon: Tag,
+                roles: [ROLES.HR_ADMIN],
+            },
+            {
+                to: "/dashboard/reports",
+                label: "Reports",
+                description: "Browse every request, or generate a leave-taken-per-employee CSV report",
+                icon: FileBarChart,
                 roles: [ROLES.HR_ADMIN],
             },
         ],

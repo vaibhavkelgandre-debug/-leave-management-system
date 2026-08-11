@@ -7,6 +7,7 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { TeamPage } from "./pages/TeamPage.jsx";
 import { EmployeesPage } from "./pages/EmployeesPage.jsx";
+import { HrReportsPage } from "./pages/HrReportsPage.jsx";
 import { MyBalancesPage } from "./pages/MyBalancesPage.jsx";
 import { LeaveTypesPage } from "./pages/LeaveTypesPage.jsx";
 import { HolidaysPage } from "./pages/HolidaysPage.jsx";
@@ -61,6 +62,7 @@ function App() {
                     <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN]} />}>
                         <Route path="employees" element={<EmployeesPage />} />
                         <Route path="leave-types" element={<LeaveTypesPage />} />
+                        <Route path="reports" element={<HrReportsPage />} />
                     </Route>
 
                     <Route path="403" element={<ForbiddenPage />} />

@@ -4,6 +4,7 @@
 // lives in the service, not here.
 import * as leaveRequestService from "../services/leaveRequestService.js";
 import { sendSuccess } from "../utils/apiResponse.js";
+import { toCsv } from "../utils/csv.js";
 
 export async function preview(req, res, next) {
     try {
@@ -49,6 +50,54 @@ export async function listAll(req, res, next) {
     try {
         const requests = await leaveRequestService.listAllLeaveRequests();
         sendSuccess(res, 200, "Leave requests retrieved", requests);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// FR-024: HR's filterable browse view. `req.query` is already validated and
+// coerced by validateQuery(listLeaveRequestsQuerySchema) before this runs.
+export async function listFiltered(req, res, next) {
+    try {
+        const requests = await leaveRequestService.listFilteredLeaveRequests(req.user, req.query);
+        sendSuccess(res, 200, "Leave requests retrieved", requests);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// FR-024's leave-taken-per-employee report, as JSON for an on-screen table.
+export async function getReport(req, res, next) {
+    try {
+        const rows = await leaveRequestService.generateLeaveTakenReport(req.user, req.query);
+        sendSuccess(res, 200, "Report generated", rows);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Same report as getReport above, formatted as a CSV file download instead
+// of the JSON envelope. Column headers are spelled out for a human opening
+// the file in a spreadsheet, not the raw snake_case row keys.
+const REPORT_CSV_COLUMNS = [
+    { key: "employee_first_name", header: "First Name" },
+    { key: "employee_last_name", header: "Last Name" },
+    { key: "employee_role", header: "Role" },
+    { key: "request_count", header: "Requests" },
+    { key: "total_days_taken", header: "Total Days Taken" },
+];
+
+export async function downloadReportCsv(req, res, next) {
+    try {
+        const rows = await leaveRequestService.generateLeaveTakenReport(req.user, req.query);
+        const csv = toCsv(REPORT_CSV_COLUMNS, rows);
+
+        res.setHeader("Content-Type", "text/csv; charset=utf-8");
+        res.setHeader(
+            "Content-Disposition",
+            `attachment; filename="leave-report-${req.query.startDate}-to-${req.query.endDate}.csv"`
+        );
+        res.send(csv);
     } catch (error) {
         next(error);
     }

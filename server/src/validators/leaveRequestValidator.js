@@ -66,3 +66,35 @@ export const overrideSchema = z.object({
     toStatus: z.enum(["APPROVED", "REJECTED"]),
     comment: z.string().trim().optional(),
 });
+
+// FR-024: query params for HR's filterable browse view (GET /leave-requests)
+// — every filter is optional, so an HR admin can start broad and narrow down.
+// `status` covers every value the state machine can ever produce, not just
+// the "active" ones — deliberately including WITHDRAWN/CANCELLED, since this
+// is a browse/report view rather than an action queue.
+export const listLeaveRequestsQuerySchema = z
+    .object({
+        employeeId: z.string().uuid("employeeId must be a valid id").optional(),
+        leaveTypeId: z.string().uuid("leaveTypeId must be a valid id").optional(),
+        status: z.enum(["SUBMITTED", "APPROVED", "REJECTED", "WITHDRAWN", "CANCELLED"]).optional(),
+        startDate: dateStringSchema.optional(),
+        endDate: dateStringSchema.optional(),
+    })
+    .refine((data) => !data.startDate || !data.endDate || data.endDate >= data.startDate, {
+        message: "endDate must be on or after startDate",
+        path: ["endDate"],
+    });
+
+// FR-024: query params for the leave-taken-per-employee report (and its CSV
+// download) — unlike the browse filters above, the period is required: a
+// report with no period at all (implicitly "all time") isn't a meaningful
+// answer to "leave taken over a period".
+export const leaveTakenReportQuerySchema = z
+    .object({
+        startDate: dateStringSchema,
+        endDate: dateStringSchema,
+    })
+    .refine((data) => data.endDate >= data.startDate, {
+        message: "endDate must be on or after startDate",
+        path: ["endDate"],
+    });

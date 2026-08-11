@@ -114,6 +114,108 @@ export async function findAllLeaveRequests() {
     return result.rows;
 }
 
+// FR-024: HR's filterable browse view — every filter is optional and, unlike
+// findAllLeaveRequests above, nothing is excluded by default (a WITHDRAWN
+// request is exactly the kind of thing HR might deliberately filter *for*
+// when browsing/reporting, unlike the approvals views where it's just dead
+// weight). The WHERE clause is built up dynamically since every filter is
+// optional, but every value is still passed as a placeholder — never string-
+// concatenated — so this stays immune to SQL injection regardless of which
+// filters are present. `startDate`/`endDate` use the standard interval-
+// overlap test (a request overlaps the filter window at all), the same
+// shape already used for holidays and overlap detection elsewhere.
+export async function findLeaveRequestsFiltered({ employeeId, leaveTypeId, status, startDate, endDate, employeeIds } = {}) {
+    // `employeeIds`, when passed, is the acting HR admin's own reporting
+    // subtree (leaveRequestService.listFilteredLeaveRequests) — an
+    // authorization boundary, not a user-facing filter, so it's applied
+    // before any of the optional filters below and short-circuits the query
+    // entirely for an HR admin with no subtree at all.
+    if (employeeIds && employeeIds.length === 0) {
+        return [];
+    }
+
+    const conditions = [];
+    const params = [];
+
+    if (employeeIds) {
+        params.push(employeeIds);
+        conditions.push(`lr.employee_id = ANY($${params.length}::uuid[])`);
+    }
+    if (employeeId) {
+        params.push(employeeId);
+        conditions.push(`lr.employee_id = $${params.length}`);
+    }
+    if (leaveTypeId) {
+        params.push(leaveTypeId);
+        conditions.push(`lr.leave_type_id = $${params.length}`);
+    }
+    if (status) {
+        params.push(status);
+        conditions.push(`lr.status = $${params.length}`);
+    }
+    if (startDate) {
+        params.push(startDate);
+        conditions.push(`lr.end_date >= $${params.length}`);
+    }
+    if (endDate) {
+        params.push(endDate);
+        conditions.push(`lr.start_date <= $${params.length}`);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    const result = await pool.query(
+        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} ${whereClause} ORDER BY lr.start_date DESC`,
+        params
+    );
+    return result.rows;
+}
+
+// FR-024's "report of leave taken per employee over a period": one row per
+// employee who has at least one APPROVED request overlapping [startDate,
+// endDate] (INNER JOIN via GROUP BY — an employee who took no leave in the
+// period simply doesn't appear, rather than showing a zero row for every
+// employee in the company). "Taken" means APPROVED specifically — pending,
+// rejected, withdrawn, and cancelled requests never actually consumed leave.
+// A request is counted in full (its whole snapshotted `working_days`, not a
+// pro-rated slice) whenever it overlaps the period at all, even if only
+// partially — the same simplification already made for the year-boundary
+// debit rule in submitLeaveRequest, documented for the same reason: a
+// day-by-day split would need re-deriving the working-day calculation for
+// an arbitrary sub-range, which is a lot more machinery for a case the
+// brief doesn't ask this precisely for.
+export async function findLeaveTakenReport({ startDate, endDate, employeeIds }) {
+    // Same subtree authorization boundary as findLeaveRequestsFiltered above
+    // — see that function's comment.
+    if (employeeIds && employeeIds.length === 0) {
+        return [];
+    }
+
+    const conditions = ["lr.status = 'APPROVED'", "lr.end_date >= $1", "lr.start_date <= $2"];
+    const params = [startDate, endDate];
+    if (employeeIds) {
+        params.push(employeeIds);
+        conditions.push(`u.id = ANY($${params.length}::uuid[])`);
+    }
+
+    const result = await pool.query(
+        `SELECT
+            u.id AS employee_id,
+            u.first_name AS employee_first_name,
+            u.last_name AS employee_last_name,
+            employee_role.role_name AS employee_role,
+            COUNT(lr.id)::int AS request_count,
+            SUM(lr.working_days)::numeric AS total_days_taken
+         FROM leave_requests lr
+         JOIN users u ON u.id = lr.employee_id
+         JOIN roles employee_role ON employee_role.id = u.role_id
+         WHERE ${conditions.join(" AND ")}
+         GROUP BY u.id, u.first_name, u.last_name, employee_role.role_name
+         ORDER BY u.first_name, u.last_name`,
+        params
+    );
+    return result.rows;
+}
+
 // FR-015: a request overlaps another of the same employee's if their date
 // ranges intersect (the standard interval-overlap test, same shape already
 // used for holidays) and the other request hasn't already been

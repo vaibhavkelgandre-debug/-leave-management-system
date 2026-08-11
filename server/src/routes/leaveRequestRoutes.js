@@ -7,13 +7,15 @@ import * as controller from "../controllers/leaveRequestController.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { uploadLeaveRequestDocument } from "../middlewares/uploadMiddleware.js";
-import { validateBody, validateParams } from "../validators/validate.js";
+import { validateBody, validateParams, validateQuery } from "../validators/validate.js";
 import {
     previewLeaveRequestSchema,
     submitLeaveRequestSchema,
     leaveRequestIdParamSchema,
     decisionSchema,
     overrideSchema,
+    listLeaveRequestsQuerySchema,
+    leaveTakenReportQuerySchema,
 } from "../validators/leaveRequestValidator.js";
 
 const router = express.Router();
@@ -40,6 +42,30 @@ router.get("/team", controller.listTeam);
 // the whole company's requests at all" is a role question, not a
 // per-record one.
 router.get("/all", requireRole("HR_ADMIN"), controller.listAll);
+// FR-024: HR's filterable browse view and leave-taken report. All three are
+// HR-only by a plain role check, same reasoning as /all above — filtering
+// doesn't change who's allowed to see the results, it's still "everyone",
+// just narrowed down. /report and /report/csv must both be registered
+// before /:id below (see this file's header comment) since /report alone
+// is a single segment /:id would otherwise swallow as if "report" were an id.
+router.get(
+    "/",
+    requireRole("HR_ADMIN"),
+    validateQuery(listLeaveRequestsQuerySchema),
+    controller.listFiltered
+);
+router.get(
+    "/report",
+    requireRole("HR_ADMIN"),
+    validateQuery(leaveTakenReportQuerySchema),
+    controller.getReport
+);
+router.get(
+    "/report/csv",
+    requireRole("HR_ADMIN"),
+    validateQuery(leaveTakenReportQuerySchema),
+    controller.downloadReportCsv
+);
 
 router.get("/:id", validateParams(leaveRequestIdParamSchema), controller.getOne);
 router.get("/:id/audit", validateParams(leaveRequestIdParamSchema), controller.getAuditTrail);

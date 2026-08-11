@@ -12,6 +12,8 @@ import {
     findLeaveRequestsForEmployee,
     findLeaveRequestsForEmployees,
     findAllLeaveRequests,
+    findLeaveRequestsFiltered,
+    findLeaveTakenReport,
     findOverlappingLeaveRequest,
     updateLeaveRequestStatus,
 } from "../repositories/leaveRequestRepository.js";
@@ -320,6 +322,50 @@ export async function listTeamLeaveRequests(actor) {
 // same distinction NFR-5's viewing-vs-acting split already draws elsewhere.
 export async function listAllLeaveRequests() {
     return findAllLeaveRequests();
+}
+
+// Shared by both FR-024 functions below: this app's auth is strict per-team
+// (see resolveActingCapacity's note above), so HR's browse/report tools are
+// scoped to the acting HR admin's own reporting subtree, exactly like
+// listTeamLeaveRequests' HR branch — never every employee in the company,
+// even though listAllLeaveRequests's read-only "All Requests" view
+// deliberately is. Excludes the HR admin themself, same as
+// listTeamLeaveRequests.
+async function subtreeEmployeeIds(actorId) {
+    const subtree = await findSubtreeUsers(actorId);
+    return subtree.filter((person) => person.id !== actorId).map((person) => person.id);
+}
+
+// FR-024: HR's filterable browse view — every filter (employeeId,
+// leaveTypeId, status, startDate/endDate) is optional, resolved entirely
+// server-side (never a client-side array filter over an already-fetched
+// list, so this stays correct and reasonably fast at the "200 employees,
+// three years of history" scale NFR-7 asks for). Route-gated to HR_ADMIN
+// (leaveRequestRoutes.js) — deliberately does not exclude WITHDRAWN the way
+// listAllLeaveRequests above does, since a withdrawn request is exactly the
+// kind of thing HR might filter *for* when browsing history, not dead
+// weight to hide as it is on the action-oriented approvals views. Scoped to
+// `actor`'s own reporting subtree (see subtreeEmployeeIds) — an `employeeId`
+// filter for someone outside it simply returns no rows, the same as
+// filtering for an employeeId that doesn't exist at all.
+export async function listFilteredLeaveRequests(actor, filters) {
+    const employeeIds = await subtreeEmployeeIds(actor.id);
+    return findLeaveRequestsFiltered({ ...filters, employeeIds });
+}
+
+// FR-024: "a report of leave taken per employee over a period" — one row
+// per employee who has at least one APPROVED request overlapping
+// [startDate, endDate], with their total working days and request count in
+// that window. See findLeaveTakenReport for the "counted in full, not
+// pro-rated" simplification on a request that only partially overlaps the
+// period. Shared by the JSON endpoint (on-screen table) and the CSV
+// download (leaveRequestController.js) — this function only returns
+// structured data, CSV formatting is a presentation concern that lives in
+// the controller. Scoped to `actor`'s own reporting subtree, same as
+// listFilteredLeaveRequests above.
+export async function generateLeaveTakenReport(actor, { startDate, endDate }) {
+    const employeeIds = await subtreeEmployeeIds(actor.id);
+    return findLeaveTakenReport({ startDate, endDate, employeeIds });
 }
 
 // Input: the actor and a request id. Output: the request, if the actor is
