@@ -24,6 +24,17 @@ export async function createLeaveType({
     return unwrap(response);
 }
 
+export async function updateLeaveType(leaveTypeId, { name, annualEntitlement, accrualType, allowNegativeBalance, requiresDocument }) {
+    const response = await apiClient.patch(`/leave-types/${leaveTypeId}`, {
+        name,
+        annualEntitlement,
+        accrualType,
+        allowNegativeBalance,
+        requiresDocument,
+    });
+    return unwrap(response);
+}
+
 export async function updateLeaveTypeStatus(leaveTypeId, isActive) {
     const response = await apiClient.patch(`/leave-types/${leaveTypeId}/status`, { isActive });
     return unwrap(response);
