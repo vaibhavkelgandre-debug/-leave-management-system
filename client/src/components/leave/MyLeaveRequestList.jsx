@@ -2,7 +2,7 @@
 // HolidayList.jsx's pattern (mobile-safe by construction, no table). Each row
 // owns its own withdraw/cancel mutation state, same convention as every
 // other row-level action in this app.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Ban, Info, X } from "lucide-react";
 import { withdrawLeaveRequest, cancelLeaveRequest } from "../../services/leaveRequestService.js";
 import { toErrorMessage } from "../../services/httpError.js";
@@ -12,7 +12,7 @@ import { StatusBadge } from "../ui/Badge.jsx";
 import { RequestDetailModal } from "./RequestDetailModal.jsx";
 import { formatDateRange, todayDateKey } from "../../utils/dates.js";
 
-function RequestItem({ request, onChanged, onViewDetails }) {
+function RequestItem({ request, onChanged, onViewDetails, isSelected, registerRef }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
@@ -54,7 +54,12 @@ function RequestItem({ request, onChanged, onViewDetails }) {
     }
 
     return (
-        <li className="px-4 py-3 transition hover:bg-slate-50/80">
+        <li
+            ref={registerRef}
+            className={`px-4 py-3 transition ${
+                isSelected ? "bg-indigo-50/80 ring-1 ring-inset ring-indigo-300" : "hover:bg-slate-50/80"
+            }`}
+        >
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -96,8 +101,18 @@ function RequestItem({ request, onChanged, onViewDetails }) {
     );
 }
 
-export function MyLeaveRequestList({ requests, onChanged }) {
+export function MyLeaveRequestList({ requests, onChanged, selectedRequestId }) {
     const [detailRequest, setDetailRequest] = useState(null);
+    const itemNodes = useRef(new Map());
+
+    // Scrolls the row picked from the calendar into view — the row itself is
+    // already visible as "selected" via `isSelected` below without this, but
+    // on a long list it can sit off-screen with no scroll container of its
+    // own (the whole page scrolls), so it needs an explicit nudge.
+    useEffect(() => {
+        if (!selectedRequestId) return;
+        itemNodes.current.get(selectedRequestId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [selectedRequestId]);
 
     return (
         <Card className="overflow-hidden">
@@ -108,6 +123,11 @@ export function MyLeaveRequestList({ requests, onChanged }) {
                         request={request}
                         onChanged={onChanged}
                         onViewDetails={setDetailRequest}
+                        isSelected={request.id === selectedRequestId}
+                        registerRef={(node) => {
+                            if (node) itemNodes.current.set(request.id, node);
+                            else itemNodes.current.delete(request.id);
+                        }}
                     />
                 ))}
             </ul>

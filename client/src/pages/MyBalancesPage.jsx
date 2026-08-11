@@ -3,10 +3,13 @@ import { useSearchParams } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { getMyBalances } from "../services/leaveBalanceService.js";
 import { getMyLeaveRequests } from "../services/leaveRequestService.js";
+import { getHolidays } from "../services/holidayService.js";
 import { Button } from "../components/ui/Button.jsx";
+import { Card } from "../components/ui/Card.jsx";
 import { Modal } from "../components/ui/Modal.jsx";
 import { RequestLeaveForm } from "../components/leave/RequestLeaveForm.jsx";
 import { MyLeaveRequestList } from "../components/leave/MyLeaveRequestList.jsx";
+import { MyLeaveCalendar } from "../components/leave/MyLeaveCalendar.jsx";
 import { LeaveBalanceCard } from "../components/leave/LeaveBalanceCard.jsx";
 import { LEAVE_BALANCE_ACCENTS } from "../constants/leaveBalanceAccents.js";
 
@@ -26,6 +29,20 @@ export function MyBalancesPage() {
     const [myRequests, setMyRequests] = useState([]);
     const [requestsLoaded, setRequestsLoaded] = useState(false);
     const [requestsError, setRequestsError] = useState(null);
+
+    // The personal calendar (FR-022) owns its own month/year navigation,
+    // independent of the balance-year selector above — holidays are fetched
+    // per whichever year the calendar is currently showing.
+    const [calendarYear, setCalendarYear] = useState(currentYear);
+    const [holidays, setHolidays] = useState([]);
+    const [loadedHolidayYear, setLoadedHolidayYear] = useState(null);
+
+    // Set when a leave request is clicked on the calendar, so the matching
+    // row can be highlighted and scrolled into view in the list beside it.
+    const [selectedRequestId, setSelectedRequestId] = useState(null);
+    // Set right after submitting a new request so the calendar can jump to
+    // it — the calendar itself owns month-to-month navigation otherwise.
+    const [focusDate, setFocusDate] = useState(null);
 
     // The sidebar's "Apply Leave" item links here with ?apply=1 so it opens
     // the form immediately instead of landing on the page and requiring a
@@ -54,6 +71,7 @@ export function MyBalancesPage() {
     const reload = () => setReloadToken((token) => token + 1);
 
     const loading = loadedYear !== year;
+    const holidaysLoading = loadedHolidayYear !== calendarYear;
 
     useEffect(() => {
         let cancelled = false;
@@ -99,8 +117,33 @@ export function MyBalancesPage() {
         };
     }, [reloadToken]);
 
-    function handleSubmitted() {
+    useEffect(() => {
+        let cancelled = false;
+
+        getHolidays({ year: calendarYear })
+            .then((data) => {
+                if (cancelled) return;
+                setHolidays(data);
+                setLoadedHolidayYear(calendarYear);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setHolidays([]);
+                setLoadedHolidayYear(calendarYear);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [calendarYear, reloadToken]);
+
+    function handleSubmitted(created) {
         setShowRequestForm(false);
+        setFocusDate(created.start_date);
+        const createdYear = Number(created.start_date.slice(0, 4));
+        if (createdYear !== calendarYear) {
+            setCalendarYear(createdYear);
+        }
         reload();
     }
 
@@ -169,28 +212,53 @@ export function MyBalancesPage() {
                 </div>
             )}
 
-            <section className="mt-8">
-                <h2 className="text-lg font-semibold text-slate-900">My requests</h2>
+            <div className="mt-8 grid gap-6 lg:grid-cols-[380px_1fr] lg:items-start">
+                <section className="lg:sticky lg:top-20">
+                    {holidaysLoading ? (
+                        <Card className="flex items-center justify-center p-10">
+                            <p role="status" className="text-sm text-slate-500">
+                                Loading…
+                            </p>
+                        </Card>
+                    ) : (
+                        <MyLeaveCalendar
+                            requests={myRequests}
+                            holidays={holidays}
+                            onActiveYearChange={setCalendarYear}
+                            focusDate={focusDate}
+                            selectedRequestId={selectedRequestId}
+                            onSelectRequest={setSelectedRequestId}
+                        />
+                    )}
+                </section>
 
-                {!requestsLoaded && (
-                    <p role="status" className="mt-2 text-sm text-slate-500">
-                        Loading…
-                    </p>
-                )}
-                {requestsError && (
-                    <p role="alert" className="mt-2 text-sm text-red-600">
-                        {requestsError}
-                    </p>
-                )}
-                {requestsLoaded && !requestsError && myRequests.length === 0 && (
-                    <p className="mt-2 text-sm text-slate-500">You haven't submitted any leave requests yet.</p>
-                )}
-                {requestsLoaded && !requestsError && myRequests.length > 0 && (
-                    <div className="mt-4">
-                        <MyLeaveRequestList requests={myRequests} onChanged={reload} />
-                    </div>
-                )}
-            </section>
+                <section>
+                    <h2 className="text-lg font-semibold text-slate-900">My requests</h2>
+
+                    {!requestsLoaded && (
+                        <p role="status" className="mt-2 text-sm text-slate-500">
+                            Loading…
+                        </p>
+                    )}
+                    {requestsError && (
+                        <p role="alert" className="mt-2 text-sm text-red-600">
+                            {requestsError}
+                        </p>
+                    )}
+                    {requestsLoaded && !requestsError && myRequests.length === 0 && (
+                        <p className="mt-2 text-sm text-slate-500">You haven't submitted any leave requests yet.</p>
+                    )}
+                    {requestsLoaded && !requestsError && myRequests.length > 0 && (
+                        <div className="mt-4">
+                            <MyLeaveRequestList
+                                requests={myRequests}
+                                onChanged={reload}
+                                selectedRequestId={selectedRequestId}
+                            />
+                        </div>
+                    )}
+                </section>
+            </div>
         </div>
     );
 }

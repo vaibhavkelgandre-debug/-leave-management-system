@@ -78,6 +78,20 @@ describe("MyLeaveRequestList", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent(/cannot withdraw a decided request/i);
     });
 
+    it("highlights the request selected from the calendar, and no other", () => {
+        renderWithProviders(
+            <MyLeaveRequestList
+                requests={[makeRequest({ id: "req-1" }), makeRequest({ id: "req-2" })]}
+                onChanged={vi.fn()}
+                selectedRequestId="req-2"
+            />
+        );
+
+        const items = screen.getAllByRole("listitem");
+        expect(items[0]).not.toHaveClass("ring-indigo-300");
+        expect(items[1]).toHaveClass("ring-indigo-300");
+    });
+
     it("opens the details modal and loads history when Details is clicked", async () => {
         leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([
             {
