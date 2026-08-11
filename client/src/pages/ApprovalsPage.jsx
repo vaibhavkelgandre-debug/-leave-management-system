@@ -1,10 +1,14 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../hooks/useAuth.js";
 import { getAllLeaveRequests, getTeamLeaveRequests } from "../services/leaveRequestService.js";
+import { getHolidays } from "../services/holidayService.js";
 import { TeamRequestList } from "../components/leave/TeamRequestList.jsx";
+import { TeamLeaveCalendar } from "../components/leave/TeamLeaveCalendar.jsx";
+import { Card } from "../components/ui/Card.jsx";
 import { PageHeader } from "../components/ui/PageHeader.jsx";
 import { ROLES } from "../constants/roles.js";
 
+const currentYear = new Date().getFullYear();
 const TABS = { TEAM: "team", ALL: "all" };
 
 export function ApprovalsPage() {
@@ -27,7 +31,19 @@ export function ApprovalsPage() {
     const [reloadToken, setReloadToken] = useState(0);
     const reload = () => setReloadToken((token) => token + 1);
 
+    // The team calendar (FR-023) owns its own month/year navigation,
+    // independent of which tab is active — holidays are fetched for
+    // whichever year the calendar is currently showing.
+    const [calendarYear, setCalendarYear] = useState(currentYear);
+    const [holidays, setHolidays] = useState([]);
+    const [loadedHolidayYear, setLoadedHolidayYear] = useState(null);
+
+    // Set when a request is clicked on the calendar, so the matching row
+    // can be highlighted and scrolled into view in the list beside it.
+    const [selectedRequestId, setSelectedRequestId] = useState(null);
+
     const loading = loadedTab !== activeTab;
+    const holidaysLoading = loadedHolidayYear !== calendarYear;
     const showingAllRequests = canOverride && activeTab === TABS.ALL;
 
     useEffect(() => {
@@ -52,6 +68,26 @@ export function ApprovalsPage() {
             cancelled = true;
         };
     }, [reloadToken, activeTab, showingAllRequests]);
+
+    useEffect(() => {
+        let cancelled = false;
+
+        getHolidays({ year: calendarYear })
+            .then((data) => {
+                if (cancelled) return;
+                setHolidays(data);
+                setLoadedHolidayYear(calendarYear);
+            })
+            .catch(() => {
+                if (cancelled) return;
+                setHolidays([]);
+                setLoadedHolidayYear(calendarYear);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [calendarYear, reloadToken]);
 
     return (
         <div>
@@ -107,17 +143,40 @@ export function ApprovalsPage() {
                     {loadError}
                 </p>
             )}
-            {!loading && !loadError && requests.length === 0 && (
-                <p className="mt-6 text-sm text-slate-500">No requests to show.</p>
-            )}
-            {!loading && !loadError && requests.length > 0 && (
-                <div className="mt-6">
-                    <TeamRequestList
-                        requests={requests}
-                        canOverride={canOverride}
-                        onChanged={reload}
-                        readOnly={showingAllRequests}
-                    />
+
+            {!loading && !loadError && (
+                <div className="mt-6 grid gap-6 lg:grid-cols-[420px_1fr] lg:items-start">
+                    <section className="lg:sticky lg:top-20">
+                        {holidaysLoading ? (
+                            <Card className="flex items-center justify-center p-10">
+                                <p role="status" className="text-sm text-slate-500">
+                                    Loading…
+                                </p>
+                            </Card>
+                        ) : (
+                            <TeamLeaveCalendar
+                                requests={requests}
+                                holidays={holidays}
+                                onActiveYearChange={setCalendarYear}
+                                selectedRequestId={selectedRequestId}
+                                onSelectRequest={setSelectedRequestId}
+                            />
+                        )}
+                    </section>
+
+                    <section>
+                        {requests.length === 0 ? (
+                            <p className="text-sm text-slate-500">No requests to show.</p>
+                        ) : (
+                            <TeamRequestList
+                                requests={requests}
+                                canOverride={canOverride}
+                                onChanged={reload}
+                                readOnly={showingAllRequests}
+                                selectedRequestId={selectedRequestId}
+                            />
+                        )}
+                    </section>
                 </div>
             )}
         </div>

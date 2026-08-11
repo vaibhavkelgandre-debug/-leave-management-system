@@ -6,7 +6,7 @@
 // onto its own lines on a narrow screen — icon-only buttons and a rigid
 // single-row layout were unreadable/cramped once a row could carry up to
 // four actions plus a role badge.
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Info, Repeat, ShieldCheck, ShieldX, X } from "lucide-react";
 import { approveLeaveRequest, rejectLeaveRequest, overrideLeaveRequest } from "../../services/leaveRequestService.js";
 import { toErrorMessage } from "../../services/httpError.js";
@@ -17,7 +17,7 @@ import { Badge, RoleBadge, StatusBadge } from "../ui/Badge.jsx";
 import { RequestDetailModal } from "./RequestDetailModal.jsx";
 import { formatDateRange } from "../../utils/dates.js";
 
-function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, readOnly = false }) {
+function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, readOnly = false, isSelected, registerRef }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
     const [showRejectComment, setShowRejectComment] = useState(false);
@@ -56,7 +56,12 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, 
     }
 
     return (
-        <li className="px-4 py-3 transition hover:bg-slate-50/80">
+        <li
+            ref={registerRef}
+            className={`px-4 py-3 transition ${
+                isSelected ? "bg-indigo-50/80 ring-1 ring-inset ring-indigo-300" : "hover:bg-slate-50/80"
+            }`}
+        >
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                     <div className="flex flex-wrap items-center gap-2">
@@ -162,12 +167,22 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, 
 // reporting subtree (enforced server-side regardless), so this tab shows no
 // action buttons at all rather than showing buttons that would just 404 for
 // most rows. Switch to "My Team" to actually act on something.
-export function TeamRequestList({ requests, canOverride, onChanged, readOnly = false }) {
+export function TeamRequestList({ requests, canOverride, onChanged, readOnly = false, selectedRequestId }) {
     // Optional chaining: some callers/tests render this before the auth
     // context has a user — the delegated-team badge just stays hidden then,
     // same as if every row were the viewer's own report.
     const { user } = useAuth();
     const [detailRequest, setDetailRequest] = useState(null);
+    const itemNodes = useRef(new Map());
+
+    // Scrolls the row picked from TeamLeaveCalendar into view — the row
+    // itself is already visible as "selected" via `isSelected` below
+    // without this, but on a long list it can sit off-screen with no
+    // scroll container of its own (the whole page scrolls).
+    useEffect(() => {
+        if (!selectedRequestId) return;
+        itemNodes.current.get(selectedRequestId)?.scrollIntoView({ behavior: "smooth", block: "center" });
+    }, [selectedRequestId]);
 
     return (
         <Card className="overflow-hidden">
@@ -181,6 +196,11 @@ export function TeamRequestList({ requests, canOverride, onChanged, readOnly = f
                         onViewDetails={setDetailRequest}
                         viewerId={user?.id}
                         readOnly={readOnly}
+                        isSelected={request.id === selectedRequestId}
+                        registerRef={(node) => {
+                            if (node) itemNodes.current.set(request.id, node);
+                            else itemNodes.current.delete(request.id);
+                        }}
                     />
                 ))}
             </ul>

@@ -143,6 +143,21 @@ describe("TeamRequestList", () => {
         expect(screen.getByText(/delegated for priya manager/i)).toBeInTheDocument();
     });
 
+    it("highlights the request selected from the team calendar, and no other", () => {
+        renderWithProviders(
+            <TeamRequestList
+                requests={[makeRequest({ id: "req-1" }), makeRequest({ id: "req-2" })]}
+                canOverride={false}
+                onChanged={vi.fn()}
+                selectedRequestId="req-2"
+            />
+        );
+
+        const items = screen.getAllByRole("listitem");
+        expect(items[0]).not.toHaveClass("ring-indigo-300");
+        expect(items[1]).toHaveClass("ring-indigo-300");
+    });
+
     describe("readOnly", () => {
         it("shows no approve/reject/override actions regardless of status, only Details", () => {
             renderWithProviders(
