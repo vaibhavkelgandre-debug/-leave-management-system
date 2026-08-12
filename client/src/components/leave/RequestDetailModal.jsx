@@ -1,20 +1,26 @@
 // Full detail view for a single leave request — everything about it (who,
-// when, why, its decision, its full history) plus its attached document
-// embedded inline, so an approver never has to leave the app to validate it.
+// when, why, its decision, its full history, the employee's leave balance
+// for the year of the leave) plus its attached document embedded inline, so
+// an approver never has to leave the app to validate it or decide on it.
 // Consolidates what used to be two separate actions ("View history" opening
 // AuditTrail, "View document" opening a new browser tab to Cloudinary) into
 // one "View details" action; AuditTrail.jsx has been folded in here and
-// retired now that both of its callers open this instead.
+// retired now that both of its callers open this instead. Approve/reject/
+// override live here too (via the same RequestActions used on the row) so a
+// decision can be made right after reading the balance and history, without
+// closing the modal first.
 import { useEffect, useState } from "react";
 import { Download } from "lucide-react";
 import { Modal } from "../ui/Modal.jsx";
 import { Button } from "../ui/Button.jsx";
 import { StatusBadge } from "../ui/Badge.jsx";
+import { RequestActions } from "./RequestActions.jsx";
 import {
     getLeaveRequestAuditTrail,
     getLeaveRequestDocument,
     getLeaveRequestDocumentDownloadUrl,
 } from "../../services/leaveRequestService.js";
+import { getUserBalances } from "../../services/leaveBalanceService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { formatDateRange, formatDateTime } from "../../utils/dates.js";
 
@@ -59,9 +65,10 @@ function AuditEntryRow({ entry }) {
 // flash of the previous one's data. The document itself is offered as a
 // filename + download link rather than embedded inline — an approver only
 // needs to open/save it, not read it inside this modal.
-export function RequestDetailModal({ request, open, onClose }) {
+export function RequestDetailModal({ request, open, onClose, canOverride = false, readOnly = false, onChanged }) {
     const [trailResult, setTrailResult] = useState(null);
     const [docResult, setDocResult] = useState(null);
+    const [balanceResult, setBalanceResult] = useState(null);
 
     useEffect(() => {
         if (!open || !request) return;
@@ -79,6 +86,16 @@ export function RequestDetailModal({ request, open, onClose }) {
                     setDocResult({ requestId: request.id, doc: null, error: toErrorMessage(err, "Unable to load document") })
                 );
         }
+
+        // Balances are per-year — use the year the leave actually falls in
+        // (the request's start date), not the current calendar year, since a
+        // request can be for a future year.
+        const year = new Date(request.start_date).getFullYear();
+        getUserBalances(request.employee_id, { year })
+            .then((balances) => setBalanceResult({ requestId: request.id, balances, error: null }))
+            .catch((err) =>
+                setBalanceResult({ requestId: request.id, balances: null, error: toErrorMessage(err, "Unable to load leave balance") })
+            );
     }, [open, request]);
 
     if (!request) return null;
@@ -91,7 +108,12 @@ export function RequestDetailModal({ request, open, onClose }) {
     const doc = isDocCurrent ? docResult.doc : null;
     const docError = isDocCurrent ? docResult.error : null;
 
+    const isBalanceCurrent = balanceResult?.requestId === request.id;
+    const balances = isBalanceCurrent ? balanceResult.balances : null;
+    const balanceError = isBalanceCurrent ? balanceResult.error : null;
+
     const workingDays = Number(request.working_days);
+    const balanceYear = new Date(request.start_date).getFullYear();
 
     return (
         <Modal open={open} onClose={onClose} title="Request details" size="lg">
@@ -109,6 +131,58 @@ export function RequestDetailModal({ request, open, onClose }) {
                         {(request.start_half_day || request.end_half_day) && " (half day)"}
                     </p>
                 </div>
+
+                <div>
+                    <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                        Leave balance ({balanceYear})
+                    </h3>
+                    {balanceError && (
+                        <p role="alert" className="mt-1 text-sm text-red-600">
+                            {balanceError}
+                        </p>
+                    )}
+                    {!balanceError && balances === null && <p className="mt-1 text-sm text-slate-500">Loading…</p>}
+                    {!balanceError && balances !== null && balances.length === 0 && (
+                        <p className="mt-1 text-sm text-slate-500">No balance on record for {balanceYear}.</p>
+                    )}
+                    {!balanceError && balances !== null && balances.length > 0 && (
+                        <ul className="mt-1 space-y-1.5">
+                            {balances.map((balance) => {
+                                const isRequestedType = balance.leave_type_id === request.leave_type_id;
+                                return (
+                                    <li
+                                        key={balance.id}
+                                        className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-sm ${
+                                            isRequestedType ? "border-l-2 border-indigo-400 bg-indigo-50/60" : ""
+                                        }`}
+                                    >
+                                        <span className="font-medium text-slate-800">
+                                            {balance.leave_type_name}
+                                            {isRequestedType && (
+                                                <span className="ml-1.5 text-xs font-normal text-indigo-600">(requested)</span>
+                                            )}
+                                        </span>
+                                        <span className="text-xs text-slate-500">
+                                            {balance.days_remaining} remaining · {balance.entitlement} entitled ·{" "}
+                                            {balance.days_taken} taken · {balance.days_pending} pending
+                                        </span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    )}
+                </div>
+
+                {!readOnly && (
+                    <RequestActions
+                        request={request}
+                        canOverride={canOverride}
+                        onChanged={() => {
+                            onChanged?.();
+                            onClose();
+                        }}
+                    />
+                )}
 
                 <div>
                     <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">Reason</h3>

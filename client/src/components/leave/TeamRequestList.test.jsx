@@ -5,8 +5,10 @@ import { renderWithProviders, makeAuthValue } from "../../tests/renderWithProvid
 import { TeamRequestList } from "./TeamRequestList.jsx";
 import { ROLES } from "../../constants/roles.js";
 import * as leaveRequestService from "../../services/leaveRequestService.js";
+import * as leaveBalanceService from "../../services/leaveBalanceService.js";
 
 vi.mock("../../services/leaveRequestService.js");
+vi.mock("../../services/leaveBalanceService.js");
 
 function makeRequest(overrides = {}) {
     return {
@@ -27,6 +29,7 @@ function makeRequest(overrides = {}) {
 describe("TeamRequestList", () => {
     beforeEach(() => {
         vi.clearAllMocks();
+        leaveBalanceService.getUserBalances.mockResolvedValue([]);
     });
 
     it("offers approve/reject on a pending request, but not on a decided one", () => {
