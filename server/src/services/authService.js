@@ -13,6 +13,7 @@ import {
 import { hashPassword, verifyPassword } from "../utils/password.js";
 import { signAuthToken } from "../utils/jwt.js";
 import { getGoogleClient } from "../config/googleClient.js";
+import { fetchGithubIdentity } from "../config/githubClient.js";
 import { badRequest, unauthorized, forbidden } from "../utils/appError.js";
 
 // Constant-time string comparison so checking the HR registration code doesn't leak
@@ -78,6 +79,45 @@ export async function loginWithGoogle(idToken) {
             provider: "GOOGLE",
             providerUserId: payload.sub,
             providerEmail: payload.email,
+        });
+    }
+
+    await touchLastLogin(authUser.id);
+
+    const token = signAuthToken({ sub: authUser.id, role: authUser.role });
+    const user = await findUserById(authUser.id);
+    return { token, user };
+}
+
+// Alternative login method via GitHub OAuth — same rules as loginWithGoogle: only
+// signs into an existing account matched by email, never creates one, and links the
+// GitHub identity on first successful sign-in. GitHub's flow yields an authorization
+// code rather than an ID token, so the identity comes from fetchGithubIdentity's code
+// exchange instead of a local JWT verification.
+export async function loginWithGithub(code) {
+    let identity;
+    try {
+        identity = await fetchGithubIdentity(code);
+    } catch {
+        throw unauthorized("Invalid GitHub code");
+    }
+
+    if (!identity.email) {
+        throw unauthorized("GitHub email is not verified");
+    }
+
+    const authUser = await findAuthByEmail(identity.email);
+    if (!authUser || authUser.status !== "ACTIVE") {
+        throw forbidden("No account found for this email");
+    }
+
+    const existingLink = await findByProviderSubject("GITHUB", identity.githubId);
+    if (!existingLink) {
+        await insertOauthAccount({
+            userId: authUser.id,
+            provider: "GITHUB",
+            providerUserId: identity.githubId,
+            providerEmail: identity.email,
         });
     }
 

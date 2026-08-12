@@ -1,6 +1,7 @@
 import { Routes, Route } from "react-router-dom";
 import { HomePage } from "./pages/HomePage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
+import { GithubCallbackPage } from "./pages/GithubCallbackPage.jsx";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.jsx";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage.jsx";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
@@ -28,6 +29,7 @@ function App() {
 
             <Route element={<PublicOnlyRoute />}>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/login/github/callback" element={<GithubCallbackPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             </Route>
 

@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth.js";
 import { validateLoginForm } from "../../utils/validation.js";
 import { GoogleLoginButton } from "./GoogleLoginButton.jsx";
+import { GithubLoginButton } from "./GithubLoginButton.jsx";
 import { Button } from "../ui/Button.jsx";
 
 const inputClasses =
@@ -131,9 +132,8 @@ export function LoginForm() {
                 <div className="h-px flex-1 bg-slate-200" />
             </div>
 
-            <div className="flex justify-center">
-                <GoogleLoginButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
-            </div>
+            <GoogleLoginButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
+            <GithubLoginButton />
         </div>
     );
 }

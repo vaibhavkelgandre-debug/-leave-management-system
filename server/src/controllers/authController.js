@@ -41,6 +41,18 @@ export async function googleLogin(req, res, next) {
     }
 }
 
+// Alternative login method via GitHub OAuth — only signs in users who already have an
+// account, same rule as googleLogin; never creates new accounts.
+export async function githubLogin(req, res, next) {
+    try {
+        const { token, user } = await authService.loginWithGithub(req.body.code);
+        setAuthCookie(res, token);
+        sendSuccess(res, 200, "Logged in", { user });
+    } catch (error) {
+        next(error);
+    }
+}
+
 // Ends the session by clearing the auth cookie; there's no server-side token to
 // invalidate since auth is stateless JWT-in-cookie.
 export async function logout(req, res) {

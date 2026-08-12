@@ -42,6 +42,20 @@ export async function loginWithGoogle(idToken) {
     }
 }
 
+export async function loginWithGithub(code) {
+    try {
+        const response = await apiClient.post(
+            "/auth/github",
+            { code },
+            { skipAuthRedirect: true }
+        );
+        const data = unwrap(response);
+        return normalizeUser(data?.user);
+    } catch (error) {
+        throw toHttpError(error);
+    }
+}
+
 export async function logout() {
     await apiClient.post("/auth/logout");
 }

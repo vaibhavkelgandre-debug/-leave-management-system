@@ -168,7 +168,7 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 - HR registration uses a **secret registration code**.
 - Roles: `EMPLOYEE`, `MANAGER`, `HR_ADMIN`.
 - Passwords must be hashed using **bcrypt**.
-- Google OAuth is only an **alternative login method** for existing users (not a signup path).
+- Google and GitHub OAuth are only **alternative login methods** for existing users (not a signup path) — an email that doesn't match an active account is rejected (`403`), never auto-registered. Google verifies a client-issued ID token (`google-auth-library`); GitHub has no such token, so its authorization `code` is exchanged server-side for an access token and then a verified primary email (`server/src/config/githubClient.js`). Both link their provider identity into the same provider-agnostic `oauth_accounts` table (`provider` column) on first successful sign-in.
 
 ---
 
