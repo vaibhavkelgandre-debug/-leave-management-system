@@ -1,8 +1,8 @@
-// One person's row in the "All Employees" org view (EmployeesPage.jsx) —
-// used for a leadership row, a team card's manager header, a team's report,
-// and an "unassigned" row alike, so the manager-reassign/activate-deactivate
-// logic lives in exactly one place regardless of which card a person is
-// currently rendered inside.
+// One person's row, shared by the read-only "All Employees" org view
+// (EmployeesPage.jsx, `showActions={false}`) and the interactive "My Team"
+// page (TeamPage.jsx, actions on by default) — the manager-reassign/
+// activate-deactivate logic lives in exactly one place regardless of which
+// page a person is currently rendered on.
 import { useState } from "react";
 import { Check, Pencil, UserCheck, UserX, X } from "lucide-react";
 import { updateManager, updateStatus } from "../../services/userService.js";
@@ -12,13 +12,15 @@ import { ManagerSelect } from "./ManagerSelect.jsx";
 import { Avatar } from "../ui/Avatar.jsx";
 import { IconButton } from "../ui/IconButton.jsx";
 import { Badge, RoleBadge, StatusBadge } from "../ui/Badge.jsx";
+import { STATUS_BADGE_CLASSES } from "../../constants/badges.js";
 
 const ALLOWED_MANAGER_ROLES = {
     MANAGER: ["HR_ADMIN"],
     EMPLOYEE: ["MANAGER", "HR_ADMIN"],
     // An HR admin's manager must be another HR admin — specifically
-    // whichever HR admin created them (see the edit-permission note below).
-    HR_ADMIN: ["HR_ADMIN"],
+    // whichever HR admin created them (see the edit-permission note below) —
+    // or the single SUPER_ADMIN.
+    HR_ADMIN: ["HR_ADMIN", "SUPER_ADMIN"],
 };
 
 // `showReportsTo`: only useful where the surrounding card doesn't already
@@ -26,7 +28,24 @@ const ALLOWED_MANAGER_ROLES = {
 // team card would just be repeating that card's own header, but a row in
 // the "reports directly to HR" card needs it since there's no single
 // grouping manager to imply it.
-export function EmployeePersonRow({ user, users, onChanged, showReportsTo = false, className = "" }) {
+//
+// `showActions`: change-manager/activate-deactivate only render on the "My
+// Team" page (TeamPage.jsx) — managing your own team is what those actions
+// are for, so the company-wide "All Employees" view (EmployeesPage.jsx)
+// renders every row read-only by passing this false.
+//
+// `showProfileStatus`: the profile_status badge (INCOMPLETE/SUBMITTED/
+// VERIFIED) only renders on "My Team" — that's where HR needs, at a glance,
+// to tell who on their team is already verified from who still isn't.
+export function EmployeePersonRow({
+    user,
+    users,
+    onChanged,
+    showReportsTo = false,
+    showActions = true,
+    showProfileStatus = false,
+    className = "",
+}) {
     const { user: currentUser } = useAuth();
     const [isEditingManager, setIsEditingManager] = useState(false);
     const [selectedManagerId, setSelectedManagerId] = useState(user.manager_id || "");
@@ -108,6 +127,9 @@ export function EmployeePersonRow({ user, users, onChanged, showReportsTo = fals
                         {isSelf && <Badge className="bg-indigo-100 text-indigo-700">You</Badge>}
                         <RoleBadge role={user.role} />
                         <StatusBadge status={user.status} />
+                        {showProfileStatus && user.profile_status && (
+                            <Badge className={STATUS_BADGE_CLASSES[user.profile_status]}>{user.profile_status}</Badge>
+                        )}
                     </div>
                     <p className="text-xs text-slate-500">{user.email}</p>
                     {showReportsTo && (
@@ -151,26 +173,28 @@ export function EmployeePersonRow({ user, users, onChanged, showReportsTo = fals
                 </div>
             </div>
 
-            <div className="flex shrink-0 items-center gap-1">
-                {canEditManager && !isEditingManager && (
-                    <IconButton icon={Pencil} label="Change manager" onClick={startEditing} />
-                )}
-                {/* Your own row keeps showing this (disabled) even though
-                    you didn't "create yourself" — deactivating yourself is
-                    already independently blocked below, and hiding it
-                    entirely here would read as a missing control rather
-                    than an intentional one. */}
-                {user.status !== "INVITED" && (isSelf || canEditStatus) && (
-                    <IconButton
-                        icon={isActive ? UserX : UserCheck}
-                        label={isSelf ? "You cannot deactivate your own account" : isActive ? "Deactivate" : "Activate"}
-                        variant={isActive ? "danger" : "success"}
-                        loading={statusSaving}
-                        disabled={isSelf}
-                        onClick={toggleStatus}
-                    />
-                )}
-            </div>
+            {showActions && (
+                <div className="flex shrink-0 items-center gap-1">
+                    {canEditManager && !isEditingManager && (
+                        <IconButton icon={Pencil} label="Change manager" onClick={startEditing} />
+                    )}
+                    {/* Your own row keeps showing this (disabled) even though
+                        you didn't "create yourself" — deactivating yourself is
+                        already independently blocked below, and hiding it
+                        entirely here would read as a missing control rather
+                        than an intentional one. */}
+                    {user.status !== "INVITED" && (isSelf || canEditStatus) && (
+                        <IconButton
+                            icon={isActive ? UserX : UserCheck}
+                            label={isSelf ? "You cannot deactivate your own account" : isActive ? "Deactivate" : "Activate"}
+                            variant={isActive ? "danger" : "success"}
+                            loading={statusSaving}
+                            disabled={isSelf}
+                            onClick={toggleStatus}
+                        />
+                    )}
+                </div>
+            )}
         </li>
     );
 }

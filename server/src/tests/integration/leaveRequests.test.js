@@ -452,7 +452,7 @@ describe("Leave requests", () => {
             expect(response.statusCode).toBe(200);
         });
 
-        it("lets an HR admin approve a request within their own reporting subtree", async () => {
+        it("stops HR approving a request directly when the employee has their own manager — HR must wait, then override", async () => {
             const hr = await createRootHr({ email: "authz-hr-own-branch@example.com" });
             const manager = await createUser({ role: "MANAGER", managerId: hr.id, email: "authz-hr-own-mgr@example.com" });
             const employee = await createUser({
@@ -469,9 +469,58 @@ describe("Leave requests", () => {
             });
 
             const hrAgent = await loginAs(hr);
-            const response = await hrAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+            // HR is in-subtree (knows this request exists — can view/browse/
+            // report on it) but isn't the assigned manager, so this is 403,
+            // not 404 (see resolveActingCapacity's NFR-5 note).
+            const directAttempt = await hrAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+            expect(directAttempt.statusCode).toBe(403);
 
-            expect(response.statusCode).toBe(200);
+            const managerAgent = await loginAs(manager);
+            const managerDecision = await managerAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+            expect(managerDecision.statusCode).toBe(200);
+            expect(managerDecision.body.data.status).toBe("APPROVED");
+
+            const overrideResponse = await hrAgent
+                .post(`/api/leave-requests/${leaveRequest.id}/override`)
+                .send({ toStatus: "REJECTED", comment: "Team is short-staffed that week" });
+            expect(overrideResponse.statusCode).toBe(200);
+            expect(overrideResponse.body.data.status).toBe("REJECTED");
+        });
+
+        it("still lets HR approve directly when HR genuinely is the assigned manager — a MANAGER's own request, or an employee reporting straight to HR", async () => {
+            const hr = await createRootHr({ email: "authz-hr-is-manager@example.com" });
+            const managerReportingToHr = await createUser({
+                role: "MANAGER",
+                managerId: hr.id,
+                email: "authz-hr-is-manager-mgr@example.com",
+            });
+            const employeeReportingToHr = await createUser({
+                role: "EMPLOYEE",
+                managerId: hr.id,
+                email: "authz-hr-is-manager-emp@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "HR Is Manager Leave", annualEntitlement: 10 });
+
+            const managerRequest = await createLeaveRequest({
+                employeeId: managerReportingToHr.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-02",
+                endDate: "2030-12-02",
+            });
+            const employeeRequest = await createLeaveRequest({
+                employeeId: employeeReportingToHr.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-03",
+                endDate: "2030-12-03",
+            });
+
+            const hrAgent = await loginAs(hr);
+            expect((await hrAgent.post(`/api/leave-requests/${managerRequest.id}/approve`).send({})).statusCode).toBe(
+                200
+            );
+            expect((await hrAgent.post(`/api/leave-requests/${employeeRequest.id}/approve`).send({})).statusCode).toBe(
+                200
+            );
         });
 
         it("stops an HR admin approving a request outside their own reporting subtree — this app supports more than one HR_ADMIN", async () => {
@@ -526,9 +575,39 @@ describe("Leave requests", () => {
             const hrAAgent = await loginAs(hrA);
             const response = await hrAAgent
                 .post(`/api/leave-requests/${leaveRequest.id}/override`)
-                .send({ toStatus: "REJECTED" });
+                .send({ toStatus: "REJECTED", comment: "Attempted cross-branch override" });
 
             expect(response.statusCode).toBe(404);
+        });
+
+        it("rejects an override with no comment — a reason is required", async () => {
+            const hr = await createRootHr({ email: "authz-override-noreason-hr@example.com" });
+            const manager = await createUser({
+                role: "MANAGER",
+                managerId: hr.id,
+                email: "authz-override-noreason-mgr@example.com",
+            });
+            const employee = await createUser({
+                role: "EMPLOYEE",
+                managerId: manager.id,
+                email: "authz-override-noreason-emp@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Override No Reason Leave", annualEntitlement: 10 });
+            const leaveRequest = await createLeaveRequest({
+                employeeId: employee.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-12-08",
+                endDate: "2030-12-09",
+            });
+            const managerAgent = await loginAs(manager);
+            await managerAgent.post(`/api/leave-requests/${leaveRequest.id}/approve`).send({});
+
+            const hrAgent = await loginAs(hr);
+            const response = await hrAgent
+                .post(`/api/leave-requests/${leaveRequest.id}/override`)
+                .send({ toStatus: "REJECTED" });
+
+            expect(response.statusCode).toBe(422);
         });
     });
 

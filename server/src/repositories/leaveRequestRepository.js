@@ -31,7 +31,7 @@ const JOINED_COLUMNS = `
     lr.start_date, lr.end_date, lr.start_half_day, lr.end_half_day, lr.working_days,
     lr.reason, lr.status, lr.decided_by, lr.decided_at, lr.decision_comment,
     lr.created_at, lr.updated_at,
-    u.first_name AS employee_first_name, u.last_name AS employee_last_name, u.manager_id AS employee_manager_id,
+    u.first_name AS employee_first_name, u.last_name AS employee_last_name, u.email AS employee_email, u.manager_id AS employee_manager_id,
     employee_role.role_name AS employee_role,
     manager.first_name AS manager_first_name, manager.last_name AS manager_last_name,
     decider.first_name AS decided_by_first_name, decider.last_name AS decided_by_last_name,
@@ -49,6 +49,12 @@ const JOINED_FROM = `FROM leave_requests lr
 // the leave type name/employee details from validating the submission).
 // Always created as SUBMITTED; no failure mode beyond a DB constraint (e.g. a
 // bad FK) surfacing as a generic error.
+// `status`/`decidedBy`/`decidedAt` default to a plain SUBMITTED row (the
+// normal path — the DB column default would do this anyway, but passing it
+// explicitly keeps every column visible in one place); SUPER_ADMIN's
+// auto-approve bypass (leaveRequestService.submitLeaveRequest) is the one
+// caller that overrides them, inserting directly as APPROVED so the row
+// never exists in an intermediate SUBMITTED state even momentarily.
 export async function insertLeaveRequest({
     employeeId,
     leaveTypeId,
@@ -58,13 +64,16 @@ export async function insertLeaveRequest({
     endHalfDay,
     workingDays,
     reason,
+    status = "SUBMITTED",
+    decidedBy = null,
+    decidedAt = null,
 }) {
     const result = await pool.query(
         `INSERT INTO leave_requests
-            (employee_id, leave_type_id, start_date, end_date, start_half_day, end_half_day, working_days, reason)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            (employee_id, leave_type_id, start_date, end_date, start_half_day, end_half_day, working_days, reason, status, decided_by, decided_at)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING ${BASE_COLUMNS}`,
-        [employeeId, leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, workingDays, reason]
+        [employeeId, leaveTypeId, startDate, endDate, startHalfDay, endHalfDay, workingDays, reason, status, decidedBy, decidedAt]
     );
     return result.rows[0];
 }
@@ -247,4 +256,23 @@ export async function updateLeaveRequestStatus(id, { status, decidedBy, decision
         [id, status, decidedBy, decisionComment]
     );
     return result.rows[0] || null;
+}
+
+// Module 5 v2: LOP (loss of pay) days for one employee's payroll period —
+// the sum of `working_days` on their APPROVED requests of any leave type
+// flagged `counts_as_lop`, overlapping [startDate, endDate] (same interval-
+// overlap test as findLeaveTakenReport above). Reuses existing leave data
+// instead of a separate attendance system, which doesn't exist in this app.
+export async function findLopWorkingDays(employeeId, startDate, endDate) {
+    const result = await pool.query(
+        `SELECT COALESCE(SUM(lr.working_days), 0) AS lop_days
+         FROM leave_requests lr
+         JOIN leave_types lt ON lt.id = lr.leave_type_id
+         WHERE lr.employee_id = $1
+           AND lr.status = 'APPROVED'
+           AND lt.counts_as_lop = true
+           AND lr.end_date >= $2 AND lr.start_date <= $3`,
+        [employeeId, startDate, endDate]
+    );
+    return Number(result.rows[0].lop_days);
 }

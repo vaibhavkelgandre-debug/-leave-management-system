@@ -60,11 +60,13 @@ export function InviteEmployeeForm({ onInvited }) {
 
     // Mirrors the server's hierarchy rule (reportingService.js): an employee
     // may report to a manager or an HR admin, a manager only to an HR admin,
-    // and an HR admin only to another HR admin.
+    // and an HR admin to another HR admin or to the super admin. Spelled out
+    // explicitly (rather than "!== EMPLOYEE") now that a 4th role exists —
+    // an employee/manager must never see SUPER_ADMIN as an option here.
     const reportingOptions = (users ?? []).filter((u) => {
-        if (form.role === ROLES.HR_ADMIN) return u.role === ROLES.HR_ADMIN;
+        if (form.role === ROLES.HR_ADMIN) return u.role === ROLES.HR_ADMIN || u.role === ROLES.SUPER_ADMIN;
         if (form.role === ROLES.MANAGER) return u.role === ROLES.HR_ADMIN;
-        return u.role !== ROLES.EMPLOYEE;
+        return u.role === ROLES.MANAGER || u.role === ROLES.HR_ADMIN;
     });
 
     const reportingLabel =

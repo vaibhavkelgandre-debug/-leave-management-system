@@ -101,8 +101,18 @@ function RequestItem({ request, onChanged, onViewDetails, isSelected, registerRe
     );
 }
 
-export function MyLeaveRequestList({ requests, onChanged, selectedRequestId }) {
-    const [detailRequest, setDetailRequest] = useState(null);
+export function MyLeaveRequestList({ requests, onChanged, selectedRequestId, autoOpenRequestId }) {
+    // Opens the detail modal automatically, once, for a notification-driven
+    // target (NotificationBell.jsx/notificationRouting.js) — a lazy
+    // initializer rather than an effect, same pattern ApplyLeavePage's
+    // focusDate uses: it runs once on this list's first mount (always after
+    // `requests` is already loaded, so the target is there to find) and
+    // deliberately never re-fires on a later `requests` reload. `selectedRequestId`
+    // (below) is the separate, reactive prop a calendar click also sets just to
+    // highlight/scroll a row without popping the modal open uninvited.
+    const [detailRequest, setDetailRequest] = useState(
+        () => requests.find((request) => request.id === autoOpenRequestId) ?? null
+    );
     const itemNodes = useRef(new Map());
 
     // Scrolls the row picked from the calendar into view — the row itself is

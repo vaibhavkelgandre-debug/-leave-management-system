@@ -6,6 +6,8 @@ import {
     getUserById,
     updateManager,
     updateStatus,
+    updateMyProfile,
+    changePassword,
 } from "../controllers/userController.js";
 import { requireAuth } from "../middlewares/authMiddleware.js";
 import { requireRole } from "../middlewares/requireRole.js";
@@ -17,6 +19,7 @@ import {
     updateManagerSchema,
     updateStatusSchema,
 } from "../validators/userValidator.js";
+import { updateMyProfileSchema, changePasswordSchema } from "../validators/profileValidator.js";
 
 const router = express.Router();
 
@@ -24,22 +27,26 @@ const router = express.Router();
 // so individual routes below don't have to repeat it.
 router.use(requireAuth);
 
-router.post("/invite", requireRole("HR_ADMIN"), validateBody(inviteEmployeeSchema), inviteEmployee);
+router.post("/invite", requireRole("HR_ADMIN", "SUPER_ADMIN"), validateBody(inviteEmployeeSchema), inviteEmployee);
 router.get("/me/team", getMyTeam);
+// Self-only by construction (always req.user.id, no :id param) — no
+// requireUserScope needed, unlike GET /:id below.
+router.patch("/me/profile", validateBody(updateMyProfileSchema), updateMyProfile);
+router.post("/me/password", validateBody(changePasswordSchema), changePassword);
 router.get("/", getUsers);
 // requireUserScope restricts non-HR callers to only fetch their own record or
 // direct reports, so employees/managers can't read arbitrary users by id.
 router.get("/:id", validateParams(userIdParamSchema), requireUserScope("id"), getUserById);
 router.patch(
     "/:id/manager",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateParams(userIdParamSchema),
     validateBody(updateManagerSchema),
     updateManager
 );
 router.patch(
     "/:id/status",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateParams(userIdParamSchema),
     validateBody(updateStatusSchema),
     updateStatus

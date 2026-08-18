@@ -43,6 +43,29 @@ describe("InviteEmployeeForm", () => {
         expect(screen.queryByLabelText("Manager")).not.toBeInTheDocument();
     });
 
+    it("offers the super admin alongside other HR admins as who a new HR admin can report to", async () => {
+        userService.getUsers.mockResolvedValue([
+            makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
+            makeUser({ id: "super-1", first_name: "Sam", role: ROLES.SUPER_ADMIN }),
+            makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
+        ]);
+        renderForm();
+        await screen.findByLabelText(/first name/i);
+
+        await userEvent.selectOptions(screen.getByLabelText(/role/i), ROLES.HR_ADMIN);
+
+        const select = screen.getByLabelText("Reports to");
+        expect(within(select).getByRole("option", { name: /Sam/ })).toBeInTheDocument();
+        // A manager is never a valid choice here, super admin or not.
+        expect(within(select).queryByRole("option", { name: /Manoj/ })).not.toBeInTheDocument();
+
+        // Confirms ManagerSelect actually renders the option under its own
+        // optgroup, not just that the filter upstream accepted it — the two
+        // have silently drifted apart before.
+        await userEvent.selectOptions(select, "super-1");
+        expect(select).toHaveValue("super-1");
+    });
+
     it("defaults the HR admin reporting-line picker to the inviter themself, labeled \"You\"", async () => {
         userService.getUsers.mockResolvedValue([
             makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),

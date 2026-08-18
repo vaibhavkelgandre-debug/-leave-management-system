@@ -12,6 +12,13 @@ describe("groupEmployeesForOrgView", () => {
         expect(leadership.map((u) => u.id)).toEqual(["hr-a", "hr-b"]);
     });
 
+    it("puts SUPER_ADMIN in leadership alongside HR_ADMIN, not unassigned", () => {
+        const users = [user("super", "Sam", "SUPER_ADMIN"), user("hr", "Priya", "HR_ADMIN", "super")];
+        const { leadership, unassigned } = groupEmployeesForOrgView(users);
+        expect(leadership.map((u) => u.id).sort()).toEqual(["hr", "super"]);
+        expect(unassigned).toEqual([]);
+    });
+
     it("gives every MANAGER their own team, with their direct EMPLOYEE reports sorted inside it", () => {
         const users = [
             user("hr", "Priya", "HR_ADMIN"),

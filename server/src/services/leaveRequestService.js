@@ -5,7 +5,8 @@
 // SQL, the controller stays thin glue, exactly like every other feature.
 import { findLeaveTypeById } from "../repositories/leaveTypeRepository.js";
 import { findAllHolidays } from "../repositories/holidayRepository.js";
-import { findDirectReports, findSubtreeUsers, isUserInSubtree } from "../repositories/userRepository.js";
+import { findDirectReports, findAuthContextById, isUserInSubtree } from "../repositories/userRepository.js";
+import { isInActorsHrScope, getHrScopedEmployeeIds } from "./hrScopeService.js";
 import {
     insertLeaveRequest,
     findLeaveRequestById,
@@ -28,6 +29,11 @@ import {
 import { calculateWorkingDays } from "./workingDayService.js";
 import { assertLegalTransition } from "./leaveRequestStateMachine.js";
 import { uploadLeaveRequestDocument, getSignedDocumentUrl, fetchDocumentStream } from "./cloudinaryService.js";
+import {
+    notifyLeaveRequestSubmitted,
+    notifyLeaveRequestDecided,
+    notifyLeaveRequestWithdrawnOrCancelled,
+} from "./notificationService.js";
 import { detectFileType } from "../utils/fileType.js";
 import { todayDateKey } from "../utils/dates.js";
 import { badRequest, conflict, forbidden, notFound } from "../utils/appError.js";
@@ -109,15 +115,23 @@ async function isManagerOrDelegateOf(actorId, employeeManagerId) {
 // role, or a delegation window that isn't active today) — see the NFR-5
 // policy note in .claude/rules.md.
 //
-// HR's authority is scoped to their own reporting subtree
-// (`isUserInSubtree`), not the whole company: this app supports more than
-// one HR_ADMIN, each the root of their own separate branch (a MANAGER's own
-// manager_id names one specific HR admin, not the role generically), so
-// "HR can act on any request" from the brief means *their* requests, the
-// same way it would for a manager — not every other HR admin's branch too.
-// Company-wide visibility for HR is still available read-only via
-// listAllLeaveRequests/getLeaveRequestById below, which this function has
-// no bearing on; only the mutating actions are scoped here.
+// HR's *override* authority (APPROVED<->REJECTED, after a decision already
+// exists) is scoped to their own reporting subtree (`isUserInSubtree`), not
+// the whole company: this app supports more than one HR_ADMIN, each the
+// root of their own separate branch (a MANAGER's own manager_id names one
+// specific HR admin, not the role generically), so "HR can act on any
+// request" from the brief means *their* requests, the same way it would for
+// a manager — not every other HR admin's branch too. Company-wide visibility
+// for HR is still available read-only via listAllLeaveRequests/
+// getLeaveRequestById below, which this function has no bearing on.
+//
+// HR's authority to approve/reject a still-SUBMITTED request directly,
+// though, is *not* subtree-wide (client-requested change, superseding an
+// earlier version of this rule) — HR must be the request's actual assigned
+// manager (or an active delegate for that manager) to decide first, the same
+// as anyone else. See the APPROVE/REJECT branch below for why this still
+// covers HR acting on their own or a MANAGER's leave request without any
+// extra role-casing.
 async function resolveActingCapacity(actor, request, action) {
     const isOwner = actor.id === request.employee_id;
 
@@ -145,18 +159,35 @@ async function resolveActingCapacity(actor, request, action) {
         throw notFound("Leave request not found");
     }
 
-    // APPROVE / REJECT: HR can act on their own reporting subtree; otherwise
-    // the actor must be the employee's direct manager or an active delegate
-    // for that manager.
-    if (actor.role === "HR_ADMIN") {
-        if (await isUserInSubtree(actor.id, request.employee_id)) {
-            return { actedFor: null };
-        }
-        throw notFound("Leave request not found");
-    }
+    // APPROVE / REJECT: the actor must be the employee's direct manager or
+    // an active delegate for that manager — the same check for everyone,
+    // HR included. Client-requested change: HR no longer has a blanket
+    // "act on your whole subtree" bypass here — the flow is always employee
+    // submits -> the actual manager decides -> HR may override afterward
+    // (see the HR_OVERRIDE branch above, still subtree-scoped). This still
+    // lets HR decide directly whenever HR genuinely *is* the assigned
+    // manager — an employee with no manager, a MANAGER (who only ever
+    // reports to HR_ADMIN), or an HR_ADMIN reporting to another HR_ADMIN
+    // all have `employee_manager_id` pointing straight at an HR_ADMIN
+    // already, so nothing more than this one check is needed to also cover
+    // "not for manager and HR's own requests."
     if (await isManagerOrDelegateOf(actor.id, request.employee_manager_id)) {
         const actingAsDelegate = request.employee_manager_id !== actor.id;
         return { actedFor: actingAsDelegate ? request.employee_manager_id : null };
+    }
+
+    // An HR-tier actor whose scope *does* include this employee already has a
+    // legitimate reason to know the request exists (they can view/browse/
+    // report on it elsewhere) — so a blocked direct approve/reject for them
+    // is 403 ("not your call until the manager decides"), not 404. Someone
+    // outside that scope is a stranger like anyone else (NFR-5). SUPER_ADMIN's
+    // scope here is only their direct-report HR_ADMINs — practically moot for
+    // this specific branch, since a direct-report HR_ADMIN's own request
+    // always resolves via the manager-approve branch above instead, but kept
+    // for the same "distinguish stranger from someone who just isn't the
+    // decider" reasoning isUserInSubtree gives HR_ADMIN.
+    if (await isInActorsHrScope(actor, request.employee_id)) {
+        throw forbidden("Only the employee's manager can approve or reject this request — HR can override the decision afterward");
     }
 
     throw notFound("Leave request not found");
@@ -234,6 +265,17 @@ export async function submitLeaveRequest(
         uploadedDocument = await uploadLeaveRequestDocument({ buffer: file.buffer, mimeType: detectedFileType });
     }
 
+    // SUPER_ADMIN has no manager and nobody positioned to review their own
+    // leave — per product decision, their request bypasses the review
+    // workflow entirely rather than being routed through a self-approval
+    // step: created directly as APPROVED, never SUBMITTED, even momentarily.
+    // Every check above this line still applies unchanged (leave type,
+    // document requirement, working-day count, overlap, balance) — bypassing
+    // *who decides* doesn't mean bypassing whether the numbers are still
+    // true afterward (NFR-2).
+    const submitter = await findAuthContextById(employeeId);
+    const isSuperAdminSubmission = submitter?.role === "SUPER_ADMIN";
+
     const request = await insertLeaveRequest({
         employeeId,
         leaveTypeId,
@@ -243,6 +285,9 @@ export async function submitLeaveRequest(
         endHalfDay,
         workingDays,
         reason,
+        ...(isSuperAdminSubmission
+            ? { status: "APPROVED", decidedBy: employeeId, decidedAt: new Date() }
+            : {}),
     });
 
     if (uploadedDocument) {
@@ -255,6 +300,35 @@ export async function submitLeaveRequest(
             fileSizeBytes: file.size,
             uploadedBy: employeeId,
         });
+    }
+
+    if (isSuperAdminSubmission) {
+        // A single APPROVE-tagged entry, never ledgerDeltaForAction's
+        // APPROVE case (that assumes an earlier SUBMIT entry already moved
+        // the days into pending, and is releasing that hold) and never a
+        // SUBMIT entry either — there's no pending state to represent here,
+        // since this never passed through SUBMITTED.
+        await insertLedgerEntry({
+            userId: employeeId,
+            leaveTypeId,
+            year,
+            leaveRequestId: request.id,
+            pendingDelta: 0,
+            takenDelta: workingDays,
+            reason: "APPROVE",
+        });
+        await insertAuditLog({
+            leaveRequestId: request.id,
+            actorId: employeeId,
+            action: "AUTO_APPROVE",
+            oldStatus: null,
+            newStatus: "APPROVED",
+        });
+        // No notification — SUPER_ADMIN has no manager, so there's no
+        // recipient (notifyLeaveRequestSubmitted would already no-op here
+        // via resolveManagerOrNearestHrAncestor returning null, but skipping
+        // it outright is clearer about intent).
+        return findLeaveRequestById(request.id);
     }
 
     await insertLedgerEntry({
@@ -275,7 +349,12 @@ export async function submitLeaveRequest(
         newStatus: "SUBMITTED",
     });
 
-    return findLeaveRequestById(request.id);
+    const createdRequest = await findLeaveRequestById(request.id);
+    // Notifies the employee's manager (or nearest HR ancestor if they report
+    // straight to HR) — a non-critical side effect, so its own failure never
+    // fails the submission itself (see notifyLeaveRequestSubmitted).
+    await notifyLeaveRequestSubmitted(createdRequest);
+    return createdRequest;
 }
 
 // Output: the employee's own requests.
@@ -298,9 +377,8 @@ export async function listMyLeaveRequests(employeeId) {
 // plain EMPLOYEE with no direct reports of their own, who should still see
 // (and be able to act on) the delegated team's requests here.
 export async function listTeamLeaveRequests(actor) {
-    if (actor.role === "HR_ADMIN") {
-        const subtree = await findSubtreeUsers(actor.id);
-        const employeeIds = subtree.filter((person) => person.id !== actor.id).map((person) => person.id);
+    if (actor.role === "HR_ADMIN" || actor.role === "SUPER_ADMIN") {
+        const employeeIds = await getHrScopedEmployeeIds(actor);
         return findLeaveRequestsForEmployees(employeeIds);
     }
 
@@ -331,9 +409,8 @@ export async function listAllLeaveRequests() {
 // even though listAllLeaveRequests's read-only "All Requests" view
 // deliberately is. Excludes the HR admin themself, same as
 // listTeamLeaveRequests.
-async function subtreeEmployeeIds(actorId) {
-    const subtree = await findSubtreeUsers(actorId);
-    return subtree.filter((person) => person.id !== actorId).map((person) => person.id);
+async function subtreeEmployeeIds(actor) {
+    return getHrScopedEmployeeIds(actor);
 }
 
 // FR-024: HR's filterable browse view — every filter (employeeId,
@@ -349,7 +426,7 @@ async function subtreeEmployeeIds(actorId) {
 // filter for someone outside it simply returns no rows, the same as
 // filtering for an employeeId that doesn't exist at all.
 export async function listFilteredLeaveRequests(actor, filters) {
-    const employeeIds = await subtreeEmployeeIds(actor.id);
+    const employeeIds = await subtreeEmployeeIds(actor);
     return findLeaveRequestsFiltered({ ...filters, employeeIds });
 }
 
@@ -364,7 +441,7 @@ export async function listFilteredLeaveRequests(actor, filters) {
 // the controller. Scoped to `actor`'s own reporting subtree, same as
 // listFilteredLeaveRequests above.
 export async function generateLeaveTakenReport(actor, { startDate, endDate }) {
-    const employeeIds = await subtreeEmployeeIds(actor.id);
+    const employeeIds = await subtreeEmployeeIds(actor);
     return findLeaveTakenReport({ startDate, endDate, employeeIds });
 }
 
@@ -379,7 +456,12 @@ export async function getLeaveRequestById(actor, requestId) {
     }
 
     const isOwner = actor.id === request.employee_id;
-    if (isOwner || actor.role === "HR_ADMIN" || (await isManagerOrDelegateOf(actor.id, request.employee_manager_id))) {
+    if (
+        isOwner ||
+        actor.role === "HR_ADMIN" ||
+        actor.role === "SUPER_ADMIN" ||
+        (await isManagerOrDelegateOf(actor.id, request.employee_manager_id))
+    ) {
         return request;
     }
 
@@ -474,5 +556,17 @@ export async function decideLeaveRequest(actor, requestId, action, comment) {
         comment: comment || null,
     });
 
-    return findLeaveRequestById(requestId);
+    const decidedRequest = await findLeaveRequestById(requestId);
+
+    // Non-critical side effects (see notifyLeaveRequestDecided) — which
+    // employee/manager-facing notification fires depends on which action
+    // this was, never on `newStatus` alone (an override and a plain decision
+    // land on the same statuses but mean different things to the recipient).
+    if (action === "WITHDRAW" || action === "CANCEL") {
+        await notifyLeaveRequestWithdrawnOrCancelled(decidedRequest, action);
+    } else {
+        await notifyLeaveRequestDecided(decidedRequest, action, actor.id);
+    }
+
+    return decidedRequest;
 }

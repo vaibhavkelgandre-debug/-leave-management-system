@@ -4,15 +4,18 @@ import { badRequest, conflict } from "../utils/appError.js";
 // Encodes the reporting-line hierarchy rule for the org: an EMPLOYEE may
 // report to a MANAGER or directly to HR_ADMIN, a MANAGER may only report to
 // HR_ADMIN (managers can't report to other managers), and an HR_ADMIN may
-// only report to another HR_ADMIN — specifically whichever HR admin created
-// them, forming a chain (A invites B, B reports to A; B invites C, C reports
-// to B or A, whichever the inviting HR picks — see InviteEmployeeForm.jsx).
-// The root HR_ADMIN(s) who registered via POST /auth/register/hr rather than
-// being invited have no manager at all, same as before this existed.
+// report to another HR_ADMIN — specifically whichever HR admin created them,
+// forming a chain (A invites B, B reports to A; B invites C, C reports to B
+// or A, whichever the inviting HR picks — see InviteEmployeeForm.jsx) — or to
+// the single SUPER_ADMIN. SUPER_ADMIN itself is the true root of the tree,
+// created once via POST /auth/register/hr, and is absent from this map
+// entirely: assertManagerAllowed's `ALLOWED_MANAGER_ROLES[targetRole] || []`
+// fallback already treats a missing key as "no manager ever allowed," so
+// SUPER_ADMIN can never be assigned a manager through any code path.
 const ALLOWED_MANAGER_ROLES = {
     EMPLOYEE: ["MANAGER", "HR_ADMIN"],
     MANAGER: ["HR_ADMIN"],
-    HR_ADMIN: ["HR_ADMIN"],
+    HR_ADMIN: ["HR_ADMIN", "SUPER_ADMIN"],
 };
 
 // Returns everyone under a user in the reporting tree (used for the "my team"

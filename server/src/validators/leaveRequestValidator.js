@@ -61,10 +61,13 @@ export const decisionSchema = z.object({
 });
 
 // Body for HR's override endpoint — `toStatus` picks which of the two legal
-// override transitions to apply (see leaveRequestStateMachine.js).
+// override transitions to apply (see leaveRequestStateMachine.js). Unlike
+// decisionSchema above, `comment` is required here (client-requested change)
+// — overturning the employee's actual manager needs a stated reason, same
+// reasoning as profileValidator's sendProfileBackSchema requiring one.
 export const overrideSchema = z.object({
     toStatus: z.enum(["APPROVED", "REJECTED"]),
-    comment: z.string().trim().optional(),
+    comment: z.string().trim().min(1, "A reason is required to override a decision"),
 });
 
 // FR-024: query params for HR's filterable browse view (GET /leave-requests)

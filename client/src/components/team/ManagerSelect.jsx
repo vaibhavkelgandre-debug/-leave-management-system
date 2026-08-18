@@ -1,4 +1,5 @@
 const ROLE_GROUP_LABELS = {
+    SUPER_ADMIN: "Super admin",
     HR_ADMIN: "HR admins",
     MANAGER: "Managers",
 };
@@ -33,7 +34,7 @@ export function ManagerSelect({ id, label, value, onChange, options, allowNone =
                 >
                     {allowNone && <option value="">No manager</option>}
                     {!allowNone && <option value="" disabled>Who will they report to?</option>}
-                    {["HR_ADMIN", "MANAGER"].map(
+                    {["SUPER_ADMIN", "HR_ADMIN", "MANAGER"].map(
                         (role) =>
                             grouped[role]?.length > 0 && (
                                 <optgroup key={role} label={ROLE_GROUP_LABELS[role]}>

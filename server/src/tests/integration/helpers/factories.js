@@ -1,9 +1,10 @@
 import { findRoleByName } from "../../../repositories/roleRepository.js";
-import { insertUser } from "../../../repositories/userRepository.js";
+import { insertUser, updateProfileStatus } from "../../../repositories/userRepository.js";
 import { insertInvitation } from "../../../repositories/invitationRepository.js";
 import { insertLeaveType } from "../../../repositories/leaveTypeRepository.js";
 import { insertHoliday } from "../../../repositories/holidayRepository.js";
 import { insertDelegation } from "../../../repositories/delegationRepository.js";
+import { upsertStructure } from "../../../repositories/salaryStructureRepository.js";
 import { submitLeaveRequest } from "../../../services/leaveRequestService.js";
 import { hashPassword } from "../../../utils/password.js";
 
@@ -49,8 +50,22 @@ export async function createUser({
     return { ...user, role, password };
 }
 
+// A manager-less "root of a branch" HR_ADMIN fixture — distinct from
+// SUPER_ADMIN below. Most tests use this purely as a generic top-of-branch
+// HR fixture, not to exercise POST /auth/register/hr itself (which now only
+// ever produces SUPER_ADMIN, singleton-guarded — see authRegisterHr.test.js).
 export async function createRootHr(overrides = {}) {
     return createUser({ role: "HR_ADMIN", managerId: null, ...overrides });
+}
+
+// The single top-of-tree SUPER_ADMIN fixture, mirroring what
+// authService.registerHrRoot actually produces (manager-less, profile
+// VERIFIED at creation — see authRegisterHr.test.js for the real bootstrap
+// endpoint's own tests).
+export async function createSuperAdmin(overrides = {}) {
+    const user = await createUser({ role: "SUPER_ADMIN", managerId: null, ...overrides });
+    await updateProfileStatus(user.id, { status: "VERIFIED" });
+    return { ...user, profile_status: "VERIFIED" };
 }
 
 export async function createInvitedUser(overrides = {}) {
@@ -63,8 +78,44 @@ export async function createLeaveType({
     accrualType = "UPFRONT",
     allowNegativeBalance = false,
     requiresDocument = false,
+    countsAsLop = false,
 } = {}) {
-    return insertLeaveType({ name, annualEntitlement, accrualType, allowNegativeBalance, requiresDocument });
+    return insertLeaveType({ name, annualEntitlement, accrualType, allowNegativeBalance, requiresDocument, countsAsLop });
+}
+
+// Test-only shortcut past the full onboarding flow (fill profile -> upload
+// documents -> HR verifies) — sets profile_status straight to VERIFIED via
+// the repository, for tests that only care about payroll-readiness, not the
+// verification workflow itself (see profileVerification.test.js for that).
+export async function verifyEmployeeProfile(employeeId, verifiedBy) {
+    return updateProfileStatus(employeeId, { status: "VERIFIED", verifiedBy, verifiedAt: new Date() });
+}
+
+// Test-only shortcut for assigning a salary structure directly, mirroring
+// salaryStructureService.assignStructure's repository call without going
+// through the HTTP layer's auth check.
+export async function createSalaryStructure({
+    employeeId,
+    basicSalary = 30000,
+    hra = 12000,
+    pfEmployeeContribution = 1800,
+    pfEmployerContribution = 1800,
+    esic = 0,
+    specialAllowance = 5000,
+    incomeTax = 0,
+    actorId,
+} = {}) {
+    return upsertStructure({
+        employeeId,
+        basicSalary,
+        hra,
+        pfEmployeeContribution,
+        pfEmployerContribution,
+        esic,
+        specialAllowance,
+        incomeTax,
+        actorId,
+    });
 }
 
 export async function createHoliday({ name = "Test Holiday", startDate = "2026-01-01", endDate } = {}) {

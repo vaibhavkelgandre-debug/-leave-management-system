@@ -1,15 +1,23 @@
 import { Routes, Route } from "react-router-dom";
 import { HomePage } from "./pages/HomePage.jsx";
 import { LoginPage } from "./pages/LoginPage.jsx";
-import { GithubCallbackPage } from "./pages/GithubCallbackPage.jsx";
 import { ForgotPasswordPage } from "./pages/ForgotPasswordPage.jsx";
 import { ResetPasswordPage } from "./pages/ResetPasswordPage.jsx";
 import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { TeamPage } from "./pages/TeamPage.jsx";
 import { EmployeesPage } from "./pages/EmployeesPage.jsx";
+import { EmployeeDetailsPage } from "./pages/EmployeeDetailsPage.jsx";
 import { HrReportsPage } from "./pages/HrReportsPage.jsx";
 import { MyBalancesPage } from "./pages/MyBalancesPage.jsx";
+import { ApplyLeavePage } from "./pages/ApplyLeavePage.jsx";
+import { SalarySlipsPage } from "./pages/SalarySlipsPage.jsx";
+import { PayrollRunPage } from "./pages/PayrollRunPage.jsx";
+import { ProfilePage } from "./pages/ProfilePage.jsx";
+import { NotificationsPage } from "./pages/NotificationsPage.jsx";
+import { DocumentViewerPage } from "./pages/DocumentViewerPage.jsx";
+import { EmployeeVerificationPage } from "./pages/EmployeeVerificationPage.jsx";
+import { EmployeeVerificationDetailPage } from "./pages/EmployeeVerificationDetailPage.jsx";
 import { LeaveTypesPage } from "./pages/LeaveTypesPage.jsx";
 import { HolidaysPage } from "./pages/HolidaysPage.jsx";
 import { ApprovalsPage } from "./pages/ApprovalsPage.jsx";
@@ -29,7 +37,6 @@ function App() {
 
             <Route element={<PublicOnlyRoute />}>
                 <Route path="/login" element={<LoginPage />} />
-                <Route path="/login/github/callback" element={<GithubCallbackPage />} />
                 <Route path="/forgot-password" element={<ForgotPasswordPage />} />
             </Route>
 
@@ -41,18 +48,34 @@ function App() {
                     <Route index element={<DashboardPage />} />
 
                     <Route path="my-leave" element={<MyBalancesPage />} />
+                    <Route path="apply-leave" element={<ApplyLeavePage />} />
                     {/* Everyone can view the holiday calendar; only HR sees the
                         add/delete controls inside the page. */}
                     <Route path="holidays" element={<HolidaysPage />} />
+                    {/* Everyone sees their own slip history; only HR sees the
+                        upload controls and their team's slips inside the page. */}
+                    <Route path="salary-slips" element={<SalarySlipsPage />} />
+                    <Route path="profile" element={<ProfilePage />} />
+                    <Route path="notifications" element={<NotificationsPage />} />
+                    {/* No role gate: serves both an employee viewing their own
+                        document and HR reviewing someone else's (query params
+                        pick which) — the underlying signed-URL endpoints
+                        already enforce self-or-HR-in-subtree server-side. */}
+                    <Route path="documents/preview" element={<DocumentViewerPage />} />
 
-                    <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} />}>
+                    <Route element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]} />}>
                         <Route path="team" element={<TeamPage />} />
                     </Route>
 
                     {/* A plain EMPLOYEE who is currently someone's active
                         delegate also needs this page — see RequireRole.jsx. */}
                     <Route
-                        element={<RequireRole allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN]} alsoAllowIfActiveDelegate />}
+                        element={
+                            <RequireRole
+                                allowedRoles={[ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]}
+                                alsoAllowIfActiveDelegate
+                            />
+                        }
                     >
                         <Route path="approvals" element={<ApprovalsPage />} />
                     </Route>
@@ -61,10 +84,22 @@ function App() {
                         <Route path="delegations" element={<DelegationsPage />} />
                     </Route>
 
-                    <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN]} />}>
+                    <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]} />}>
                         <Route path="employees" element={<EmployeesPage />} />
+                        {/* Under /team, not /employees — reached from "My
+                            Team" and from the "Verified Employees" list on
+                            the verification page, not from "All Employees"
+                            (which stays read-only, no drill-in). Still its
+                            own HR_ADMIN-only RequireRole here, distinct from
+                            the MANAGER-or-HR_ADMIN group "team" (no :id)
+                            sits in below — a manager may see their team
+                            list, but not open this HR-only detail page. */}
+                        <Route path="team/:id" element={<EmployeeDetailsPage />} />
                         <Route path="leave-types" element={<LeaveTypesPage />} />
                         <Route path="reports" element={<HrReportsPage />} />
+                        <Route path="profile-verification" element={<EmployeeVerificationPage />} />
+                        <Route path="profile-verification/:id" element={<EmployeeVerificationDetailPage />} />
+                        <Route path="payroll-run" element={<PayrollRunPage />} />
                     </Route>
 
                     <Route path="403" element={<ForbiddenPage />} />

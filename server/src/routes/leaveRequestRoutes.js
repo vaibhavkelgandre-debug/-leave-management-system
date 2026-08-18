@@ -41,7 +41,7 @@ router.get("/team", controller.listTeam);
 // here, same reasoning as most other team/HR-scoped routes: "can you see
 // the whole company's requests at all" is a role question, not a
 // per-record one.
-router.get("/all", requireRole("HR_ADMIN"), controller.listAll);
+router.get("/all", requireRole("HR_ADMIN", "SUPER_ADMIN"), controller.listAll);
 // FR-024: HR's filterable browse view and leave-taken report. All three are
 // HR-only by a plain role check, same reasoning as /all above — filtering
 // doesn't change who's allowed to see the results, it's still "everyone",
@@ -50,19 +50,19 @@ router.get("/all", requireRole("HR_ADMIN"), controller.listAll);
 // is a single segment /:id would otherwise swallow as if "report" were an id.
 router.get(
     "/",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateQuery(listLeaveRequestsQuerySchema),
     controller.listFiltered
 );
 router.get(
     "/report",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateQuery(leaveTakenReportQuerySchema),
     controller.getReport
 );
 router.get(
     "/report/csv",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateQuery(leaveTakenReportQuerySchema),
     controller.downloadReportCsv
 );

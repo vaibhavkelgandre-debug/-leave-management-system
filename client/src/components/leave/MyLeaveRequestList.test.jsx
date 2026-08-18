@@ -92,6 +92,33 @@ describe("MyLeaveRequestList", () => {
         expect(items[1]).toHaveClass("ring-indigo-300");
     });
 
+    it("opens the details modal automatically for a notification-driven autoOpenRequestId, unlike a plain selectedRequestId", async () => {
+        leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([]);
+        renderWithProviders(
+            <MyLeaveRequestList
+                requests={[makeRequest({ id: "req-1" }), makeRequest({ id: "req-2" })]}
+                onChanged={vi.fn()}
+                selectedRequestId="req-1"
+                autoOpenRequestId="req-2"
+            />
+        );
+
+        expect(await screen.findByRole("dialog")).toBeInTheDocument();
+        expect(leaveRequestService.getLeaveRequestAuditTrail).toHaveBeenCalledWith("req-2");
+    });
+
+    it("doesn't open the details modal just from a calendar-driven selectedRequestId", () => {
+        renderWithProviders(
+            <MyLeaveRequestList
+                requests={[makeRequest({ id: "req-1" })]}
+                onChanged={vi.fn()}
+                selectedRequestId="req-1"
+            />
+        );
+
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
     it("opens the details modal and loads history when Details is clicked", async () => {
         leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([
             {

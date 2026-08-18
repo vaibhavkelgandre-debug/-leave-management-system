@@ -16,7 +16,6 @@ export function makeAuthValue(overrides = {}) {
         hasAnyRole: (...roles) => !!user && roles.flat().includes(role),
         login: vi.fn(),
         loginWithGoogle: vi.fn(),
-        loginWithGithub: vi.fn(),
         logout: vi.fn(),
         refreshUser: vi.fn(),
         ...overrides,

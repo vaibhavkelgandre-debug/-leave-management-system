@@ -1,45 +1,30 @@
 import { useEffect, useState } from "react";
 import { getMyTeam } from "../services/userService.js";
 import { useAuth } from "../hooks/useAuth.js";
+import { EmployeePersonRow } from "../components/team/EmployeePersonRow.jsx";
 import { Card } from "../components/ui/Card.jsx";
-import { RoleBadge, StatusBadge } from "../components/ui/Badge.jsx";
 
-function TeamTable({ rows, showsReportsTo }) {
+// Editing a report's manager or activate/deactivate status lives here, not
+// on "All Employees" (EmployeesPage.jsx) — managing your own team is what
+// this page is for, so `EmployeePersonRow`'s actions stay on their default
+// (`showActions={true}`) here and get turned off there instead. The
+// profile_status badge (`showProfileStatus`) is likewise only turned on
+// here, so HR can tell at a glance who on their team is already verified.
+function TeamSection({ people, users, onChanged, showReportsTo = false }) {
     return (
         <Card className="overflow-hidden">
-            {/* overflow-x-auto lets a wide table scroll horizontally on a
-                phone-width screen instead of clipping columns (NFR-8). */}
-            <div className="overflow-x-auto">
-                <table className="w-full text-left text-sm">
-                    <thead className="bg-slate-50 text-slate-500">
-                        <tr>
-                            <th className="px-4 py-2 font-medium">Person</th>
-                            <th className="px-4 py-2 font-medium">Role</th>
-                            <th className="px-4 py-2 font-medium">Status</th>
-                            {showsReportsTo && <th className="px-4 py-2 font-medium">Reports to</th>}
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-100">
-                        {rows.map((person) => (
-                            <tr key={person.id} className="hover:bg-slate-50">
-                                <td className="px-4 py-3">
-                                    <div className="font-medium text-slate-900">
-                                        {person.first_name} {person.last_name}
-                                    </div>
-                                    <div className="text-xs text-slate-500">{person.email}</div>
-                                </td>
-                                <td className="px-4 py-3">
-                                    <RoleBadge role={person.role} />
-                                </td>
-                                <td className="px-4 py-3">
-                                    <StatusBadge status={person.status} />
-                                </td>
-                                {showsReportsTo && <td className="px-4 py-3 text-slate-600">{person.managerName}</td>}
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+            <ul className="divide-y divide-slate-100">
+                {people.map((person) => (
+                    <EmployeePersonRow
+                        key={person.id}
+                        user={person}
+                        users={users}
+                        onChanged={onChanged}
+                        showReportsTo={showReportsTo}
+                        showProfileStatus
+                    />
+                ))}
+            </ul>
         </Card>
     );
 }
@@ -48,12 +33,26 @@ export function TeamPage() {
     const { user: currentUser } = useAuth();
     const [team, setTeam] = useState(null);
     const [error, setError] = useState(null);
+    // Bumped by a row's manager-reassign or activate/deactivate action to
+    // re-trigger the fetch effect, same pattern as EmployeesPage.jsx.
+    const [reloadToken, setReloadToken] = useState(0);
+    const reload = () => setReloadToken((token) => token + 1);
 
     useEffect(() => {
+        let cancelled = false;
+
         getMyTeam()
-            .then(setTeam)
-            .catch(() => setError("Unable to load your team"));
-    }, []);
+            .then((data) => {
+                if (!cancelled) setTeam(data);
+            })
+            .catch(() => {
+                if (!cancelled) setError("Unable to load your team");
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [reloadToken]);
 
     if (error) {
         return (
@@ -86,14 +85,13 @@ export function TeamPage() {
         );
     }
 
-    const byId = new Map(team.map((person) => [person.id, person]));
+    // getMyTeam() (reportingService.getTeam) deliberately excludes the
+    // caller themselves — but a report's manager-reassign dropdown, and the
+    // "reports to" label on an extended-team row, both need to be able to
+    // resolve/offer the viewer as a manager too.
+    const users = [currentUser, ...team];
     const directReports = team.filter((person) => person.manager_id === currentUser.id);
-    const extendedTeam = team
-        .filter((person) => person.manager_id !== currentUser.id)
-        .map((person) => {
-            const manager = byId.get(person.manager_id);
-            return { ...person, managerName: manager ? `${manager.first_name} ${manager.last_name}` : "—" };
-        });
+    const extendedTeam = team.filter((person) => person.manager_id !== currentUser.id);
 
     return (
         <div>
@@ -104,7 +102,7 @@ export function TeamPage() {
                 <p className="mt-1 text-sm text-slate-500">People who report straight to you.</p>
                 <div className="mt-3">
                     {directReports.length > 0 ? (
-                        <TeamTable rows={directReports} />
+                        <TeamSection people={directReports} users={users} onChanged={reload} />
                     ) : (
                         <p className="text-sm text-slate-500">Nobody reports directly to you.</p>
                     )}
@@ -118,7 +116,7 @@ export function TeamPage() {
                         Everyone further down your reporting line, and who they answer to.
                     </p>
                     <div className="mt-3">
-                        <TeamTable rows={extendedTeam} showsReportsTo />
+                        <TeamSection people={extendedTeam} users={users} onChanged={reload} showReportsTo />
                     </div>
                 </section>
             )}

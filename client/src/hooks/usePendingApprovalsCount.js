@@ -1,13 +1,21 @@
 import { useEffect, useState } from "react";
 import { getTeamLeaveRequests } from "../services/leaveRequestService.js";
+import { useAuth } from "./useAuth.js";
+import { canDecideDirectly } from "../utils/leaveRequestAuthz.js";
 
-// Count of SUBMITTED (arrived, no decision yet) requests in the caller's own
-// team-scoped list — the same data ApprovalsPage already fetches, just
-// counted instead of rendered, so the sidebar's Approvals link can show how
-// many are waiting. `enabled` skips the fetch entirely for anyone who can't
-// see that link at all (most employees), instead of every page load quietly
-// calling an endpoint whose result they'll never use.
+// Count of SUBMITTED requests the caller can actually act on *right now* —
+// the same data ApprovalsPage already fetches, just counted instead of
+// rendered, so the sidebar's Approvals link can show how many are waiting.
+// For a manager/delegate that's every SUBMITTED row in their (already
+// server-scoped) team list; for HR it's narrowed further to
+// canDecideDirectly (HR is genuinely the assigned manager) — HR's team list
+// spans their whole reporting subtree for visibility, most of which is still
+// awaiting the actual manager's decision, not HR's (see leaveRequestAuthz.js).
+// `enabled` skips the fetch entirely for anyone who can't see that link at
+// all (most employees), instead of every page load quietly calling an
+// endpoint whose result they'll never use.
 export function usePendingApprovalsCount(enabled) {
+    const { user } = useAuth();
     const [count, setCount] = useState(0);
 
     useEffect(() => {
@@ -26,7 +34,10 @@ export function usePendingApprovalsCount(enabled) {
         getTeamLeaveRequests()
             .then((requests) => {
                 if (cancelled) return;
-                setCount(requests.filter((request) => request.status === "SUBMITTED").length);
+                setCount(
+                    requests.filter((request) => request.status === "SUBMITTED" && canDecideDirectly(request, user))
+                        .length
+                );
             })
             .catch(() => {
                 if (cancelled) return;
@@ -36,7 +47,7 @@ export function usePendingApprovalsCount(enabled) {
         return () => {
             cancelled = true;
         };
-    }, [enabled]);
+    }, [enabled, user]);
 
     return enabled ? count : 0;
 }

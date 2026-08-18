@@ -1,10 +1,11 @@
 // Groups the flat `GET /users` list into the shape the "All Employees" page
 // renders as cards. The reporting hierarchy only ever has two real levels
-// worth a card of their own — HR_ADMIN never has a manager, a MANAGER only
-// ever reports to HR_ADMIN, and an EMPLOYEE reports to a MANAGER or directly
-// to HR_ADMIN (see ALLOWED_MANAGER_ROLES in EmployeePersonRow.jsx) — so this
-// is a fixed two-bucket grouping rather than a generic n-level tree:
-//   - `leadership`: every HR_ADMIN.
+// worth a card of their own — HR_ADMIN never has a manager (except the
+// single SUPER_ADMIN, itself also manager-less), a MANAGER only ever reports
+// to HR_ADMIN, and an EMPLOYEE reports to a MANAGER or directly to HR_ADMIN
+// (see ALLOWED_MANAGER_ROLES in EmployeePersonRow.jsx) — so this is a fixed
+// two-bucket grouping rather than a generic n-level tree:
+//   - `leadership`: every HR_ADMIN, plus SUPER_ADMIN.
 //   - `teams`: one entry per MANAGER, with their own direct EMPLOYEE reports.
 //   - `unassigned`: anyone who reports straight to HR_ADMIN with no manager
 //     in between, plus (defensively) anyone whose manager_id doesn't resolve
@@ -18,7 +19,7 @@ export function groupEmployeesForOrgView(users) {
     const unassigned = [];
 
     for (const user of users) {
-        if (user.role === "HR_ADMIN") {
+        if (user.role === "HR_ADMIN" || user.role === "SUPER_ADMIN") {
             leadership.push(user);
             continue;
         }

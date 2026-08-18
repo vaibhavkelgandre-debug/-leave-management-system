@@ -14,15 +14,15 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.post("/", requireRole("HR_ADMIN"), validateBody(createHolidaySchema), createHoliday);
+router.post("/", requireRole("HR_ADMIN", "SUPER_ADMIN"), validateBody(createHolidaySchema), createHoliday);
 router.get("/", validateQuery(listHolidaysQuerySchema), getHolidays);
 router.patch(
     "/:id",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateParams(holidayIdParamSchema),
     validateBody(updateHolidaySchema),
     updateHoliday
 );
-router.delete("/:id", requireRole("HR_ADMIN"), validateParams(holidayIdParamSchema), deleteHoliday);
+router.delete("/:id", requireRole("HR_ADMIN", "SUPER_ADMIN"), validateParams(holidayIdParamSchema), deleteHoliday);
 
 export default router;

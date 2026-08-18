@@ -29,7 +29,8 @@ describe("TeamOverviewSummary", () => {
         ]);
         renderWithProviders(<TeamOverviewSummary />);
 
-        expect(await screen.findByText("2 requests waiting for your decision.")).toBeInTheDocument();
+        expect(await screen.findByText("2")).toBeInTheDocument();
+        expect(screen.getByText(/waiting for your decision/i)).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /review/i })).toHaveAttribute("href", "/dashboard/approvals");
     });
 
@@ -49,23 +50,35 @@ describe("TeamOverviewSummary", () => {
                 status: "APPROVED",
                 employee_first_name: "Asha",
                 employee_last_name: "Employee",
+                employee_role: "EMPLOYEE",
+                employee_email: "asha@example.com",
                 leave_type_name: "Sick Leave",
                 start_date: today,
                 end_date: today,
+                working_days: "1.0",
+                start_half_day: true,
             },
             {
                 id: "r2",
                 status: "APPROVED",
                 employee_first_name: "Rohit",
                 employee_last_name: "Peer",
+                employee_role: "MANAGER",
+                employee_email: "rohit@example.com",
                 leave_type_name: "Annual Leave",
                 start_date: "2099-01-01",
                 end_date: "2099-01-02",
+                working_days: "2.0",
             },
         ]);
         renderWithProviders(<TeamOverviewSummary />);
 
-        expect(await screen.findByText(/asha employee — sick leave/i)).toBeInTheDocument();
+        expect(await screen.findByText("Asha Employee")).toBeInTheDocument();
+        expect(screen.getByText("Sick Leave")).toBeInTheDocument();
+        expect(screen.getByText("AE")).toBeInTheDocument();
+        expect(screen.getByText("asha@example.com")).toBeInTheDocument();
+        expect(screen.getByText("Employee")).toBeInTheDocument();
+        expect(screen.getByText(/1 day \(half day\)$/)).toBeInTheDocument();
         expect(screen.queryByText(/rohit peer/i)).not.toBeInTheDocument();
     });
 
