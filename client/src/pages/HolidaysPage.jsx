@@ -14,7 +14,7 @@ import { ROLES } from "../constants/roles.js";
 
 export function HolidaysPage() {
     const { hasAnyRole } = useAuth();
-    const canManage = hasAnyRole([ROLES.HR_ADMIN]);
+    const canManage = hasAnyRole([ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]);
 
     const [viewYear, setViewYear] = useState(new Date().getFullYear());
     // Set right after saving a holiday so the calendar can jump to it; the
@@ -108,7 +108,7 @@ export function HolidaysPage() {
                         : "Public holidays and weekends don't consume your leave."
                 }
                 action={
-                    <RoleGate allowedRoles={[ROLES.HR_ADMIN]}>
+                    <RoleGate allowedRoles={[ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]}>
                         <Button icon={Plus} onClick={openAddForm}>
                             Add Holiday
                         </Button>

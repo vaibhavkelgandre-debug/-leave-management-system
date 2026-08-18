@@ -5,35 +5,12 @@ import { toErrorMessage } from "../../services/httpError.js";
 import { Badge } from "../ui/Badge.jsx";
 import { Card } from "../ui/Card.jsx";
 import { IconButton } from "../ui/IconButton.jsx";
-import { eachDateKeyInRange, formatDateRange, toDateParts, todayDateKey } from "../../utils/dates.js";
+import { eachDateKeyInRange, formatDateRange, todayDateKey } from "../../utils/dates.js";
 
-// A compact calendar-tear chip: month above, day below. Multi-day holidays show
-// the first and last day numbers so the span reads at a glance.
-function DateChip({ startDate, endDate, isPast }) {
-    const start = toDateParts(startDate);
-    const spansDays = endDate && endDate !== startDate;
-    const end = spansDays ? toDateParts(endDate) : null;
-    const sameMonth = end && end.month === start.month;
+const thClasses = "px-3 py-2 text-left text-xs font-semibold tracking-wide text-slate-500 uppercase";
+const tdClasses = "px-3 py-2 align-top text-sm text-slate-700";
 
-    return (
-        <div
-            className={`flex h-14 w-14 shrink-0 flex-col items-center justify-center rounded-xl ring-1 ${
-                isPast
-                    ? "bg-slate-50 text-slate-400 ring-slate-200"
-                    : "bg-gradient-to-br from-indigo-50 to-violet-100 text-indigo-700 ring-indigo-100"
-            }`}
-        >
-            <span className="text-[10px] font-semibold uppercase tracking-wide">
-                {sameMonth || !end ? start.monthShort : `${start.monthShort}–${end.monthShort}`}
-            </span>
-            <span className="text-base leading-tight font-bold">
-                {end ? `${start.day}–${end.day}` : start.day}
-            </span>
-        </div>
-    );
-}
-
-function HolidayItem({ holiday, canManage, onEdit, onChanged, isSelected, registerRef }) {
+function HolidayRow({ holiday, canManage, onEdit, onChanged, isSelected, registerRef }) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState(null);
 
@@ -54,51 +31,46 @@ function HolidayItem({ holiday, canManage, onEdit, onChanged, isSelected, regist
     }
 
     return (
-        <li
+        <tr
             ref={registerRef}
-            className={`flex items-center gap-4 px-4 py-3 transition ${
-                isSelected ? "bg-amber-50/80 ring-1 ring-inset ring-amber-300" : "hover:bg-slate-50/80"
-            }`}
+            className={`transition ${isSelected ? "bg-amber-50/80 ring-1 ring-inset ring-amber-300" : "hover:bg-slate-50"}`}
         >
-            <DateChip startDate={holiday.start_date} endDate={holiday.end_date} isPast={isPast} />
-
-            <div className="min-w-0 flex-1">
+            <td className={tdClasses}>
                 <div className="flex flex-wrap items-center gap-2">
                     <span className={`font-semibold ${isPast ? "text-slate-500" : "text-slate-900"}`}>
                         {holiday.name}
                     </span>
                     {dayCount > 1 && <Badge className="bg-amber-100 text-amber-700">{dayCount} days</Badge>}
-                    {isPast && <Badge className="bg-slate-100 text-slate-500">Passed</Badge>}
                 </div>
-                <p className="mt-0.5 text-xs text-slate-500">
-                    {formatDateRange(holiday.start_date, holiday.end_date)}
-                </p>
                 {error && (
                     <p role="alert" className="mt-1 text-xs text-red-600">
                         {error}
                     </p>
                 )}
-            </div>
-
-            {canManage && (
-                <div className="flex shrink-0 items-center gap-1">
-                    <IconButton
-                        icon={Pencil}
-                        label={`Edit ${holiday.name}`}
-                        size="sm"
-                        onClick={() => onEdit(holiday)}
-                    />
-                    <IconButton
-                        icon={Trash2}
-                        label={busy ? "Deleting holiday…" : `Delete ${holiday.name}`}
-                        variant="danger"
-                        size="sm"
-                        loading={busy}
-                        onClick={handleDelete}
-                    />
-                </div>
-            )}
-        </li>
+            </td>
+            <td className={tdClasses}>{formatDateRange(holiday.start_date, holiday.end_date)}</td>
+            <td className={tdClasses}>{isPast && <Badge className="bg-slate-100 text-slate-500">Passed</Badge>}</td>
+            <td className={`${tdClasses} text-right`}>
+                {canManage && (
+                    <div className="flex items-center justify-end gap-1">
+                        <IconButton
+                            icon={Pencil}
+                            label={`Edit ${holiday.name}`}
+                            size="sm"
+                            onClick={() => onEdit(holiday)}
+                        />
+                        <IconButton
+                            icon={Trash2}
+                            label={busy ? "Deleting holiday…" : `Delete ${holiday.name}`}
+                            variant="danger"
+                            size="sm"
+                            loading={busy}
+                            onClick={handleDelete}
+                        />
+                    </div>
+                )}
+            </td>
+        </tr>
     );
 }
 
@@ -116,22 +88,42 @@ export function HolidayList({ holidays, canManage, onEdit, onChanged, selectedHo
 
     return (
         <Card className="overflow-hidden">
-            <ul className="divide-y divide-slate-100">
-                {holidays.map((holiday) => (
-                    <HolidayItem
-                        key={holiday.id}
-                        holiday={holiday}
-                        canManage={canManage}
-                        onEdit={onEdit}
-                        onChanged={onChanged}
-                        isSelected={holiday.id === selectedHolidayId}
-                        registerRef={(node) => {
-                            if (node) itemNodes.current.set(holiday.id, node);
-                            else itemNodes.current.delete(holiday.id);
-                        }}
-                    />
-                ))}
-            </ul>
+            <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                    <thead className="bg-slate-50">
+                        <tr>
+                            <th scope="col" className={thClasses}>
+                                Holiday
+                            </th>
+                            <th scope="col" className={thClasses}>
+                                Date(s)
+                            </th>
+                            <th scope="col" className={thClasses}>
+                                Status
+                            </th>
+                            <th scope="col" className={thClasses}>
+                                <span className="sr-only">Actions</span>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                        {holidays.map((holiday) => (
+                            <HolidayRow
+                                key={holiday.id}
+                                holiday={holiday}
+                                canManage={canManage}
+                                onEdit={onEdit}
+                                onChanged={onChanged}
+                                isSelected={holiday.id === selectedHolidayId}
+                                registerRef={(node) => {
+                                    if (node) itemNodes.current.set(holiday.id, node);
+                                    else itemNodes.current.delete(holiday.id);
+                                }}
+                            />
+                        ))}
+                    </tbody>
+                </table>
+            </div>
         </Card>
     );
 }

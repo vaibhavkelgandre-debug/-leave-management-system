@@ -11,12 +11,18 @@ import { todayDateKey } from "../utils/dates.js";
 vi.mock("../services/leaveRequestService.js");
 vi.mock("../services/holidayService.js");
 
+// `employee_manager_id: "hr-1"` matches the HR_ADMIN viewer id used by every
+// HR-viewing test below, so HR is genuinely the assigned manager here (the
+// still-supported carve-out — see leaveRequestAuthz.js) and these tests stay
+// about tab/fetch/action-visibility wiring rather than the direct-manager
+// gating itself, which has its own dedicated tests in RequestActions.test.jsx.
 function makeRequest(overrides = {}) {
     return {
         id: "req-1",
         employee_first_name: "Asha",
         employee_last_name: "Employee",
         employee_role: "EMPLOYEE",
+        employee_manager_id: "hr-1",
         leave_type_name: "Annual Leave",
         status: "SUBMITTED",
         start_date: "2099-01-06",

@@ -97,9 +97,40 @@ describe("TeamRequestList", () => {
         );
 
         await userEvent.click(screen.getByRole("button", { name: /override to approved/i }));
+        await userEvent.type(screen.getByPlaceholderText(/reason for overriding/i), "Reconsidered");
+        await userEvent.click(screen.getByRole("button", { name: /confirm override/i }));
 
-        expect(leaveRequestService.overrideLeaveRequest).toHaveBeenCalledWith("req-1", "APPROVED");
+        expect(leaveRequestService.overrideLeaveRequest).toHaveBeenCalledWith("req-1", "APPROVED", "Reconsidered");
         expect(onChanged).toHaveBeenCalled();
+    });
+
+    it("opens the details modal automatically for a notification-driven autoOpenRequestId, unlike a plain selectedRequestId", async () => {
+        leaveRequestService.getLeaveRequestAuditTrail.mockResolvedValue([]);
+        renderWithProviders(
+            <TeamRequestList
+                requests={[makeRequest({ id: "req-1" }), makeRequest({ id: "req-2" })]}
+                canOverride={false}
+                onChanged={vi.fn()}
+                selectedRequestId="req-1"
+                autoOpenRequestId="req-2"
+            />
+        );
+
+        expect(await screen.findByRole("dialog")).toBeInTheDocument();
+        expect(leaveRequestService.getLeaveRequestAuditTrail).toHaveBeenCalledWith("req-2");
+    });
+
+    it("doesn't open the details modal just from a calendar-driven selectedRequestId", () => {
+        renderWithProviders(
+            <TeamRequestList
+                requests={[makeRequest({ id: "req-1" })]}
+                canOverride={false}
+                onChanged={vi.fn()}
+                selectedRequestId="req-1"
+            />
+        );
+
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
     it("opens the details modal and loads history when Details is clicked", async () => {

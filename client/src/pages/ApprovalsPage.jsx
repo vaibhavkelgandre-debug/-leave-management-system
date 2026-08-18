@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "react-router-dom";
 import { useAuth } from "../hooks/useAuth.js";
 import { getAllLeaveRequests, getTeamLeaveRequests } from "../services/leaveRequestService.js";
 import { getHolidays } from "../services/holidayService.js";
@@ -13,6 +14,15 @@ const TABS = { TEAM: "team", ALL: "all" };
 
 export function ApprovalsPage() {
     const { hasAnyRole } = useAuth();
+    // Set when arriving here from a notification click (NotificationBell.jsx)
+    // — router state, not a query param, same reasoning as MyBalancesPage's
+    // focusDate/notificationRequestId. A notified recipient is always the
+    // employee's manager or an HR ancestor within their own subtree, which
+    // the default "My Team" tab already covers (see
+    // notificationService.resolveManagerOrNearestHrAncestor), so this never
+    // needs to switch to the "All Requests" tab.
+    const location = useLocation();
+    const notificationRequestId = location.state?.selectedRequestId ?? null;
     // HR's override authority is scoped to their own reporting subtree, not
     // the whole company (each HR_ADMIN is the root of their own separate
     // branch) — this only controls whether the override buttons render, the
@@ -39,8 +49,9 @@ export function ApprovalsPage() {
     const [loadedHolidayYear, setLoadedHolidayYear] = useState(null);
 
     // Set when a request is clicked on the calendar, so the matching row
-    // can be highlighted and scrolled into view in the list beside it.
-    const [selectedRequestId, setSelectedRequestId] = useState(null);
+    // can be highlighted and scrolled into view in the list beside it —
+    // also seeded from a notification click so that row starts highlighted too.
+    const [selectedRequestId, setSelectedRequestId] = useState(notificationRequestId);
 
     const loading = loadedTab !== activeTab;
     const holidaysLoading = loadedHolidayYear !== calendarYear;
@@ -174,6 +185,7 @@ export function ApprovalsPage() {
                                 onChanged={reload}
                                 readOnly={showingAllRequests}
                                 selectedRequestId={selectedRequestId}
+                                autoOpenRequestId={notificationRequestId}
                             />
                         )}
                     </section>

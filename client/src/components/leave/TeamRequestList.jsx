@@ -3,15 +3,18 @@
 // HR-only override on already-decided ones. The actions themselves (and
 // their busy/error/reject-comment state) live in RequestActions, shared with
 // RequestDetailModal so a decision can be made from either place.
-// Actions are labeled buttons (icon + text), not icon-only, and the row wraps
-// onto its own lines on a narrow screen — icon-only buttons and a rigid
-// single-row layout were unreadable/cramped once a row could carry up to
-// four actions plus a role badge.
+// Actions render icon-only here (RequestActions' `iconOnly` prop, plus
+// Details below) to keep a row compact — re-requested directly after an
+// earlier version of this exact row was switched *to* labeled buttons for
+// being "unreadable/cramped" with up to four actions plus a role badge; see
+// the note in rules.md rather than assuming this is an oversight if it ever
+// looks like a step backward. RequestDetailModal keeps its own labeled
+// RequestActions instance untouched — it has the room icon-only doesn't need.
 import { useEffect, useRef, useState } from "react";
 import { Info, Repeat } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { Card } from "../ui/Card.jsx";
-import { Button } from "../ui/Button.jsx";
+import { IconButton } from "../ui/IconButton.jsx";
 import { Badge, RoleBadge, StatusBadge } from "../ui/Badge.jsx";
 import { RequestDetailModal } from "./RequestDetailModal.jsx";
 import { RequestActions } from "./RequestActions.jsx";
@@ -57,11 +60,11 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, 
                     {request.reason && <p className="mt-1 text-xs text-slate-500">{request.reason}</p>}
                 </div>
 
-                <div className="flex flex-wrap items-center gap-2">
-                    {!readOnly && <RequestActions request={request} canOverride={canOverride} onChanged={onChanged} />}
-                    <Button icon={Info} variant="secondary" size="sm" onClick={() => onViewDetails(request)}>
-                        Details
-                    </Button>
+                <div className="flex flex-wrap items-center gap-1">
+                    {!readOnly && (
+                        <RequestActions request={request} canOverride={canOverride} onChanged={onChanged} iconOnly />
+                    )}
+                    <IconButton icon={Info} label="Details" size="sm" onClick={() => onViewDetails(request)} />
                 </div>
             </div>
         </li>
@@ -73,12 +76,22 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, 
 // reporting subtree (enforced server-side regardless), so this tab shows no
 // action buttons at all rather than showing buttons that would just 404 for
 // most rows. Switch to "My Team" to actually act on something.
-export function TeamRequestList({ requests, canOverride, onChanged, readOnly = false, selectedRequestId }) {
+export function TeamRequestList({ requests, canOverride, onChanged, readOnly = false, selectedRequestId, autoOpenRequestId }) {
     // Optional chaining: some callers/tests render this before the auth
     // context has a user — the delegated-team badge just stays hidden then,
     // same as if every row were the viewer's own report.
     const { user } = useAuth();
-    const [detailRequest, setDetailRequest] = useState(null);
+    // Opens the detail modal automatically, once, for a notification-driven
+    // target (NotificationBell.jsx/notificationRouting.js) — a lazy
+    // initializer rather than an effect, same pattern ApplyLeavePage's
+    // focusDate uses: it runs once on this list's first mount (always after
+    // `requests` is already loaded, so the target is there to find) and
+    // deliberately never re-fires on a later `requests` reload. `selectedRequestId`
+    // (below) is the separate, reactive prop a calendar click also sets just to
+    // highlight/scroll a row without popping the modal open uninvited.
+    const [detailRequest, setDetailRequest] = useState(
+        () => requests.find((request) => request.id === autoOpenRequestId) ?? null
+    );
     const itemNodes = useRef(new Map());
 
     // Scrolls the row picked from TeamLeaveCalendar into view — the row

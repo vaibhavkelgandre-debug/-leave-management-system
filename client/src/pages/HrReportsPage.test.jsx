@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, makeAuthValue } from "../tests/renderWithProviders.jsx";
 import { HrReportsPage } from "./HrReportsPage.jsx";
@@ -41,7 +41,9 @@ describe("HrReportsPage", () => {
         // A different name than makeRequest()'s "Asha Employee" — otherwise
         // this dropdown option and the rendered request row would be
         // textually indistinguishable to a plain screen.getByText query.
-        userService.getUsers.mockResolvedValue([{ id: "emp-1", first_name: "Rahul", last_name: "Singh" }]);
+        userService.getUsers.mockResolvedValue([
+            { id: "emp-1", first_name: "Rahul", last_name: "Singh", role: "EMPLOYEE", email: "rahul@example.com" },
+        ]);
         leaveTypeService.getLeaveTypes.mockResolvedValue([{ id: "lt-1", name: "Annual Leave" }]);
     });
 
@@ -56,12 +58,51 @@ describe("HrReportsPage", () => {
 
         it("re-fetches with the selected employee once filters are applied", async () => {
             renderPage();
-            await screen.findByLabelText(/employee/i);
+            const employeeInput = await screen.findByLabelText(/^employee$/i);
 
-            await userEvent.selectOptions(screen.getByLabelText(/^employee$/i), "emp-1");
+            await userEvent.click(employeeInput);
+            await userEvent.click(screen.getByRole("button", { name: /rahul singh/i }));
             await userEvent.click(screen.getByRole("button", { name: /apply filters/i }));
 
             expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({ employeeId: "emp-1" });
+        });
+
+        it("filters the employee dropdown as the search text narrows it down", async () => {
+            userService.getUsers.mockResolvedValue([
+                { id: "emp-1", first_name: "Rahul", last_name: "Singh", role: "EMPLOYEE", email: "rahul@example.com" },
+                { id: "emp-2", first_name: "Priya", last_name: "Manager", role: "MANAGER", email: "priya@example.com" },
+            ]);
+            renderPage();
+            const employeeInput = await screen.findByLabelText(/^employee$/i);
+
+            await userEvent.click(employeeInput);
+            expect(screen.getByRole("button", { name: /rahul singh/i })).toBeInTheDocument();
+            expect(screen.getByRole("button", { name: /priya manager/i })).toBeInTheDocument();
+
+            await userEvent.type(employeeInput, "pri");
+            expect(screen.queryByRole("button", { name: /rahul singh/i })).not.toBeInTheDocument();
+            expect(screen.getByRole("button", { name: /priya manager/i })).toBeInTheDocument();
+        });
+
+        it("shows each result's role and email so same-named employees are distinguishable", async () => {
+            userService.getUsers.mockResolvedValue([
+                { id: "emp-1", first_name: "John", last_name: "Smith", role: "EMPLOYEE", email: "john.smith@example.com" },
+                { id: "emp-2", first_name: "John", last_name: "Smith", role: "MANAGER", email: "john.smith2@example.com" },
+            ]);
+            renderPage();
+            const employeeInput = await screen.findByLabelText(/^employee$/i);
+
+            await userEvent.click(employeeInput);
+
+            const firstResult = screen.getByRole("button", {
+                name: /john smith.*employee.*john\.smith@example\.com/is,
+            });
+            const secondResult = screen.getByRole("button", {
+                name: /john smith.*manager.*john\.smith2@example\.com/is,
+            });
+            expect(firstResult).toBeInTheDocument();
+            expect(secondResult).toBeInTheDocument();
+            expect(firstResult).not.toBe(secondResult);
         });
 
         it("shows a read-only list — no approve/reject/override actions", async () => {
@@ -75,9 +116,10 @@ describe("HrReportsPage", () => {
 
         it("clearing filters resets and re-fetches with none applied", async () => {
             renderPage();
-            await screen.findByLabelText(/employee/i);
+            const employeeInput = await screen.findByLabelText(/^employee$/i);
 
-            await userEvent.selectOptions(screen.getByLabelText(/^employee$/i), "emp-1");
+            await userEvent.click(employeeInput);
+            await userEvent.click(screen.getByRole("button", { name: /rahul singh/i }));
             await userEvent.click(screen.getByRole("button", { name: /apply filters/i }));
             await userEvent.click(screen.getByRole("button", { name: /^clear$/i }));
 
@@ -139,6 +181,39 @@ describe("HrReportsPage", () => {
         it("disables generating a report until both dates are filled in", async () => {
             await openReportTab();
             expect(screen.getByRole("button", { name: /generate report/i })).toBeDisabled();
+        });
+
+        it("resets the period and results when Clear is clicked", async () => {
+            leaveRequestService.getLeaveTakenReport.mockResolvedValue([
+                { employee_id: "emp-1", employee_first_name: "Asha", employee_last_name: "Employee", employee_role: "EMPLOYEE", request_count: 1, total_days_taken: "1" },
+            ]);
+            await openReportTab();
+
+            await userEvent.type(screen.getByLabelText(/from/i), "2031-01-01");
+            await userEvent.type(screen.getByLabelText(/^to$/i), "2031-01-31");
+            await userEvent.click(screen.getByRole("button", { name: /generate report/i }));
+            await screen.findByText("Asha Employee");
+
+            await userEvent.click(screen.getByRole("button", { name: /^clear$/i }));
+
+            expect(screen.getByLabelText(/from/i)).toHaveValue("");
+            expect(screen.queryByText("Asha Employee")).not.toBeInTheDocument();
+        });
+
+        it("generates a report immediately for a quick-range preset, without a separate Generate click", async () => {
+            leaveRequestService.getLeaveTakenReport.mockResolvedValue([]);
+            await openReportTab();
+
+            await userEvent.click(screen.getByRole("button", { name: /^this year$/i }));
+
+            const currentYear = new Date().getFullYear();
+            await waitFor(() =>
+                expect(leaveRequestService.getLeaveTakenReport).toHaveBeenCalledWith({
+                    startDate: `${currentYear}-01-01`,
+                    endDate: `${currentYear}-12-31`,
+                })
+            );
+            expect(screen.getByLabelText(/from/i)).toHaveValue(`${currentYear}-01-01`);
         });
     });
 });

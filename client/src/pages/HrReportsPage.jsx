@@ -2,7 +2,7 @@
 // server-side: employeeId/leaveTypeId/status/date-range, never a client-side
 // array filter over an already-fetched list) and "Leave Report" (leave taken
 // per employee over a period, with a CSV download).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Download, Search } from "lucide-react";
 import {
     getFilteredLeaveRequests,
@@ -11,12 +11,13 @@ import {
 } from "../services/leaveRequestService.js";
 import { getUsers } from "../services/userService.js";
 import { getLeaveTypes } from "../services/leaveTypeService.js";
-import { TeamRequestList } from "../components/leave/TeamRequestList.jsx";
+import { LeaveRequestTable } from "../components/leave/LeaveRequestTable.jsx";
 import { Avatar } from "../components/ui/Avatar.jsx";
 import { Badge, RoleBadge } from "../components/ui/Badge.jsx";
 import { Button } from "../components/ui/Button.jsx";
 import { Card } from "../components/ui/Card.jsx";
 import { PageHeader } from "../components/ui/PageHeader.jsx";
+import { SearchSelect } from "../components/ui/SearchSelect.jsx";
 
 const TABS = { BROWSE: "browse", REPORT: "report" };
 const STATUS_OPTIONS = ["SUBMITTED", "APPROVED", "REJECTED", "WITHDRAWN", "CANCELLED"];
@@ -40,6 +41,22 @@ function BrowseRequestsTab() {
     const [error, setError] = useState(null);
 
     const loading = loadedFilters !== appliedFilters;
+
+    // SearchSelect needs {value,label} pairs rather than raw user rows —
+    // built once per `users` fetch, not recomputed on every keystroke. Role
+    // badge + email ride along as `badge`/`sublabel` so two people who share
+    // a name (common past a few hundred employees) are still distinguishable
+    // in the dropdown — email is the one field guaranteed unique per person.
+    const employeeOptions = useMemo(
+        () =>
+            users.map((user) => ({
+                value: user.id,
+                label: `${user.first_name} ${user.last_name}`,
+                sublabel: user.email,
+                badge: <RoleBadge role={user.role} />,
+            })),
+        [users]
+    );
 
     useEffect(() => {
         getUsers()
@@ -102,20 +119,14 @@ function BrowseRequestsTab() {
                         <label htmlFor="employeeId" className={labelClasses}>
                             Employee
                         </label>
-                        <select
+                        <SearchSelect
                             id="employeeId"
-                            name="employeeId"
+                            aria-label="Filter by employee"
+                            options={employeeOptions}
                             value={filters.employeeId}
-                            onChange={handleFilterChange}
-                            className={inputClasses}
-                        >
-                            <option value="">Everyone</option>
-                            {users.map((user) => (
-                                <option key={user.id} value={user.id}>
-                                    {user.first_name} {user.last_name}
-                                </option>
-                            ))}
-                        </select>
+                            onChange={(employeeId) => setFilters((prev) => ({ ...prev, employeeId }))}
+                            placeholder="Everyone"
+                        />
                     </div>
 
                     <div>
@@ -212,16 +223,44 @@ function BrowseRequestsTab() {
                 {!loading && !error && requests.length === 0 && (
                     <p className="text-sm text-slate-500">No requests match these filters.</p>
                 )}
-                {!loading && !error && requests.length > 0 && (
-                    <TeamRequestList requests={requests} canOverride={false} onChanged={() => {}} readOnly />
-                )}
+                {!loading && !error && requests.length > 0 && <LeaveRequestTable requests={requests} />}
             </div>
         </div>
     );
 }
 
+// "This month"/"Last month"/"This year" — the three ranges HR reaches for
+// most often, so a report can be pulled in one click instead of typing both
+// dates by hand every time. Pure so it's trivial to test independent of the
+// component's own state.
+function computePresetRange(preset, today = new Date()) {
+    const pad = (n) => String(n).padStart(2, "0");
+    const toKey = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    if (preset === "thisMonth") {
+        return {
+            startDate: toKey(new Date(today.getFullYear(), today.getMonth(), 1)),
+            endDate: toKey(new Date(today.getFullYear(), today.getMonth() + 1, 0)),
+        };
+    }
+    if (preset === "lastMonth") {
+        return {
+            startDate: toKey(new Date(today.getFullYear(), today.getMonth() - 1, 1)),
+            endDate: toKey(new Date(today.getFullYear(), today.getMonth(), 0)),
+        };
+    }
+    // thisYear
+    return { startDate: `${today.getFullYear()}-01-01`, endDate: `${today.getFullYear()}-12-31` };
+}
+
+const PRESETS = [
+    { key: "thisMonth", label: "This month" },
+    { key: "lastMonth", label: "Last month" },
+    { key: "thisYear", label: "This year" },
+];
+
 function LeaveReportTab() {
-    const [period, setPeriod] = useState({ startDate: "", endDate: "" });
+    const emptyPeriod = { startDate: "", endDate: "" };
+    const [period, setPeriod] = useState(emptyPeriod);
     const [rows, setRows] = useState(null);
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState(null);
@@ -234,14 +273,11 @@ function LeaveReportTab() {
         setRows(null);
     }
 
-    async function handleGenerate(event) {
-        event.preventDefault();
-        if (!hasValidPeriod) return;
-
+    async function generateReport(targetPeriod) {
         setLoading(true);
         setError(null);
         try {
-            const data = await getLeaveTakenReport(period);
+            const data = await getLeaveTakenReport(targetPeriod);
             setRows(data);
         } catch {
             setError("Unable to generate the report");
@@ -250,12 +286,32 @@ function LeaveReportTab() {
         }
     }
 
+    function handleGenerate(event) {
+        event.preventDefault();
+        if (!hasValidPeriod) return;
+        generateReport(period);
+    }
+
+    // One click sets the range *and* runs the report — the whole point of a
+    // preset is skipping the extra "now press Generate" step.
+    function applyPreset(preset) {
+        const range = computePresetRange(preset);
+        setPeriod(range);
+        generateReport(range);
+    }
+
+    function handleClear() {
+        setPeriod(emptyPeriod);
+        setRows(null);
+        setError(null);
+    }
+
     const totalDays = (rows ?? []).reduce((sum, row) => sum + Number(row.total_days_taken), 0);
 
     return (
         <div>
             <Card className="p-4">
-                <form onSubmit={handleGenerate} className="flex flex-wrap items-end gap-3">
+                <form onSubmit={handleGenerate} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-6">
                     <div>
                         <label htmlFor="report-startDate" className={labelClasses}>
                             From
@@ -285,23 +341,45 @@ function LeaveReportTab() {
                             className={inputClasses}
                         />
                     </div>
-                    <Button type="submit" size="sm" loading={loading} disabled={!hasValidPeriod}>
-                        Generate report
-                    </Button>
-                    <Button
-                        as="a"
-                        href={hasValidPeriod ? getLeaveTakenReportCsvUrl(period) : undefined}
-                        variant="secondary"
-                        size="sm"
-                        icon={Download}
-                        aria-disabled={!hasValidPeriod}
-                        onClick={(event) => {
-                            if (!hasValidPeriod) event.preventDefault();
-                        }}
-                    >
-                        Download CSV
-                    </Button>
+                    <div className="flex flex-wrap items-end gap-2 sm:col-span-2 lg:col-span-4">
+                        <Button type="submit" size="sm" loading={loading} disabled={!hasValidPeriod}>
+                            Generate report
+                        </Button>
+                        <Button
+                            as="a"
+                            href={hasValidPeriod ? getLeaveTakenReportCsvUrl(period) : undefined}
+                            variant="secondary"
+                            size="sm"
+                            icon={Download}
+                            aria-disabled={!hasValidPeriod}
+                            onClick={(event) => {
+                                if (!hasValidPeriod) event.preventDefault();
+                            }}
+                        >
+                            Download CSV
+                        </Button>
+                        <Button type="button" variant="ghost" size="sm" onClick={handleClear}>
+                            Clear
+                        </Button>
+                    </div>
                 </form>
+
+                <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
+                    <span className="text-xs font-medium text-slate-500">Quick ranges:</span>
+                    {PRESETS.map((preset) => (
+                        <Button
+                            key={preset.key}
+                            type="button"
+                            variant="secondary"
+                            size="sm"
+                            loading={loading}
+                            onClick={() => applyPreset(preset.key)}
+                        >
+                            {preset.label}
+                        </Button>
+                    ))}
+                </div>
+
                 {error && (
                     <p role="alert" className="mt-3 text-sm text-red-600">
                         {error}
