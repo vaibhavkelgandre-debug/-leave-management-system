@@ -44,7 +44,19 @@ export function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile
                     mobileOpen ? "translate-x-0" : "-translate-x-full"
                 } ${collapsed ? "lg:w-20" : "lg:w-64"}`}
             >
-                <div className="flex h-16 shrink-0 items-center justify-between border-b border-slate-100 px-4">
+                {/* The mobile close button is lg:hidden, so at lg+ this row's only
+                    ever-visible child is the logo Link — justify-between then has
+                    nothing to distribute it against and leaves it pinned to the
+                    left edge instead of centered like the nav icons below it once
+                    the sidebar is collapsed to icon-only width. Override to
+                    centered specifically for that collapsed+desktop case; the
+                    mobile drawer (logo + close button, never collapsed) still
+                    needs the two ends of the row kept apart. */}
+                <div
+                    className={`flex h-16 shrink-0 items-center justify-between border-b border-slate-100 px-4 ${
+                        collapsed ? "lg:justify-center" : ""
+                    }`}
+                >
                     <Link to="/dashboard" className="flex items-center gap-2 overflow-hidden" onClick={onCloseMobile}>
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-600 to-violet-600 text-sm font-bold text-white shadow-sm">
                             L
@@ -65,7 +77,17 @@ export function Sidebar({ collapsed, onToggleCollapse, mobileOpen, onCloseMobile
                     </button>
                 </div>
 
-                <div className="flex-1 overflow-y-auto px-3 py-4">
+                {/* overflow-x-hidden is deliberate, not redundant with
+                    overflow-y-auto: CSS forces *both* axes into a clipping
+                    box together once either is non-`visible`, so leaving
+                    overflow-x unset here doesn't actually keep it `visible`
+                    — it silently becomes `auto` too, and used to surface a
+                    phantom horizontal scrollbar the moment anything (e.g. a
+                    tooltip trying to float outside this column) contributed
+                    to this element's scrollable-overflow width. Explicit
+                    overflow-x-hidden clips that instead of scrolling it —
+                    nothing here should ever need horizontal scroll. */}
+                <div className="scrollbar-thin flex-1 overflow-x-hidden overflow-y-auto px-3 py-4">
                     <NavBar collapsed={collapsed} onNavigate={onCloseMobile} />
                 </div>
 

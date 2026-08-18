@@ -1,4 +1,4 @@
-import { NavLink } from "react-router-dom";
+import { NavLink, useLocation } from "react-router-dom";
 import {
     CalendarCheck,
     CalendarPlus,
@@ -9,11 +9,14 @@ import {
     Repeat,
     Sun,
     Tag,
+    UserCheck,
     Users,
+    Wallet,
 } from "lucide-react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useActiveDelegation } from "../../hooks/useActiveDelegation.js";
 import { usePendingApprovalsCount } from "../../hooks/usePendingApprovalsCount.js";
+import { Tooltip } from "../ui/Tooltip.jsx";
 import { ROLES } from "../../constants/roles.js";
 
 // `description` is what makes the bar "talkative" — it's the hover tooltip and
@@ -39,7 +42,7 @@ const NAV_GROUPS = [
                 roles: null,
             },
             {
-                to: "/dashboard/my-leave?apply=1",
+                to: "/dashboard/apply-leave",
                 label: "Apply Leave",
                 description: "Submit a new leave request",
                 icon: CalendarPlus,
@@ -53,18 +56,38 @@ const NAV_GROUPS = [
                 roles: null,
             },
             {
+                to: "/dashboard/salary-slips",
+                label: "Salary Slips",
+                description: "Your payslip history, and HR's payroll upload tool",
+                icon: Wallet,
+                roles: null,
+            },
+        ],
+    },
+    // Grouped and labeled the same way as "HR Admin" below — a manager's own
+    // team-facing pages used to sit unlabeled alongside everyone's personal
+    // leave pages, which read as inconsistent once HR's section already got
+    // its own heading. HR sees this group too (My Team/Approvals are
+    // [MANAGER, HR_ADMIN]), which is intentional: it's grouped by
+    // "manager-level" functionality, not by role name — an HR admin acting
+    // on their own team's requests is doing the same job a manager does here.
+    {
+        id: "manager",
+        label: "Manager",
+        items: [
+            {
                 to: "/dashboard/team",
                 label: "My Team",
                 description: "Everyone who reports to you",
                 icon: Users,
-                roles: [ROLES.MANAGER, ROLES.HR_ADMIN],
+                roles: [ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
             },
             {
                 to: "/dashboard/approvals",
                 label: "Approvals",
                 description: "Leave requests waiting on your decision",
                 icon: ClipboardCheck,
-                roles: [ROLES.MANAGER, ROLES.HR_ADMIN],
+                roles: [ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
                 // A plain EMPLOYEE currently standing in as someone's active
                 // delegate also needs this link — see useActiveDelegation.js.
                 alsoVisibleForActiveDelegate: true,
@@ -87,21 +110,28 @@ const NAV_GROUPS = [
                 label: "All Employees",
                 description: "Everyone in the organisation, and invite new joiners",
                 icon: IdCard,
-                roles: [ROLES.HR_ADMIN],
+                roles: [ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
+            },
+            {
+                to: "/dashboard/profile-verification",
+                label: "Profile Verification",
+                description: "Review submitted profiles, documents and assign salary structures",
+                icon: UserCheck,
+                roles: [ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
             },
             {
                 to: "/dashboard/leave-types",
                 label: "Leave Types",
                 description: "Entitlements, accrual rules and document requirements",
                 icon: Tag,
-                roles: [ROLES.HR_ADMIN],
+                roles: [ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
             },
             {
                 to: "/dashboard/reports",
                 label: "Reports",
                 description: "Browse every request, or generate a leave-taken-per-employee CSV report",
                 icon: FileBarChart,
-                roles: [ROLES.HR_ADMIN],
+                roles: [ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
             },
         ],
     },
@@ -109,55 +139,83 @@ const NAV_GROUPS = [
 
 function NavItem({ item, collapsed, onNavigate }) {
     const Icon = item.icon;
+    const location = useLocation();
     // `end` only makes sense for a plain path — "/dashboard/my-leave?apply=1"
     // should still highlight as active on "/dashboard/my-leave".
-    const [to] = item.to.split("?");
+    const [to, query] = item.to.split("?");
     const badgeCount = item.badgeCount ?? 0;
     const badgeLabel = badgeCount > 9 ? "9+" : String(badgeCount);
 
+    // Tooltip only in the collapsed (icon-only) rail — the label is already
+    // visible as text once expanded, so a hover description there would just
+    // be a redundant repeat of what's already on screen. Content is the
+    // short label itself (never the longer `item.description`), matching
+    // what the expanded sidebar already shows for this same item. `portal`
+    // is required here specifically: the nav column is `overflow-y-auto`
+    // (Sidebar.jsx) for vertical scrolling, and a plain CSS tooltip trying to
+    // float out to the right of an 80px-wide collapsed icon would get
+    // silently clipped by that same scroll container — see Tooltip.jsx.
+    const tooltipLabel = collapsed ? `${item.label}${badgeCount > 0 ? ` (${badgeCount} pending)` : ""}` : null;
+
     return (
         <li>
-            <NavLink
-                to={item.to}
-                end={to === "/dashboard"}
-                title={collapsed ? `${item.label}${badgeCount > 0 ? ` (${badgeCount} pending)` : ""}` : item.description}
-                onClick={onNavigate}
-                className={({ isActive }) =>
-                    `flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                        collapsed ? "justify-center" : ""
-                    } ${
-                        isActive
-                            ? "bg-indigo-50 text-indigo-700"
-                            : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
-                    }`
-                }
-            >
-                <span className="relative shrink-0">
-                    <Icon className="h-4.5 w-4.5" aria-hidden="true" />
-                    {/* Collapsed rail has no room for the label's own count
-                        pill below, so a plain dot on the icon is the only
-                        signal that something's waiting. */}
-                    {collapsed && badgeCount > 0 && (
-                        <span
-                            className="absolute -top-1.5 -right-1.5 h-2 w-2 rounded-full bg-amber-500"
-                            aria-hidden="true"
-                        />
-                    )}
-                </span>
-                {!collapsed && (
-                    <span className="flex flex-1 items-center justify-between gap-2">
-                        <span>{item.label}</span>
-                        {badgeCount > 0 && (
+            <Tooltip label={tooltipLabel} position="right" portal className="flex w-full">
+                <NavLink
+                    to={item.to}
+                    end={to === "/dashboard"}
+                    onClick={onNavigate}
+                    // Collapsed hides the label <span> entirely (not just
+                    // visually) — without this, the link's accessible name
+                    // computes to empty (the icon is aria-hidden), leaving
+                    // screen reader users with an unlabeled link. Expanded
+                    // already gets its name from the visible label text, so
+                    // this would be redundant there.
+                    aria-label={collapsed ? item.label : undefined}
+                    className={({ isActive }) => {
+                        // NavLink's own isActive only compares pathnames, never the
+                        // query string — "My Leave" and "Apply Leave" share the same
+                        // path (one plain, one with ?apply=1), so without this both
+                        // would light up together regardless of which was clicked.
+                        // Only an item whose `to` actually carries a query needs the
+                        // extra exact-match check; everything else keeps NavLink's
+                        // own (query-agnostic) result unchanged.
+                        const active = query ? isActive && location.search === `?${query}` : isActive;
+                        return `flex w-full items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                            collapsed ? "justify-center" : ""
+                        } ${
+                            active
+                                ? "bg-indigo-50 text-indigo-700"
+                                : "text-slate-600 hover:bg-slate-100 hover:text-slate-900"
+                        }`;
+                    }}
+                >
+                    <span className="relative shrink-0">
+                        <Icon className="h-4.5 w-4.5" aria-hidden="true" />
+                        {/* Collapsed rail has no room for the label's own count
+                            pill below, so a plain dot on the icon is the only
+                            signal that something's waiting. */}
+                        {collapsed && badgeCount > 0 && (
                             <span
-                                className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700"
-                                aria-label={`${badgeCount} pending`}
-                            >
-                                {badgeLabel}
-                            </span>
+                                className="absolute -top-1.5 -right-1.5 h-2 w-2 rounded-full bg-amber-500"
+                                aria-hidden="true"
+                            />
                         )}
                     </span>
-                )}
-            </NavLink>
+                    {!collapsed && (
+                        <span className="flex flex-1 items-center justify-between gap-2">
+                            <span>{item.label}</span>
+                            {badgeCount > 0 && (
+                                <span
+                                    className="rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold text-amber-700"
+                                    aria-label={`${badgeCount} pending`}
+                                >
+                                    {badgeLabel}
+                                </span>
+                            )}
+                        </span>
+                    )}
+                </NavLink>
+            </Tooltip>
         </li>
     );
 }
@@ -168,7 +226,7 @@ function NavItem({ item, collapsed, onNavigate }) {
 export function NavBar({ collapsed = false, onNavigate }) {
     const { hasAnyRole } = useAuth();
     const { hasActiveDelegation } = useActiveDelegation();
-    const canSeeApprovals = hasAnyRole([ROLES.MANAGER, ROLES.HR_ADMIN]) || hasActiveDelegation;
+    const canSeeApprovals = hasAnyRole([ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]) || hasActiveDelegation;
     // Skips the fetch entirely for anyone who can't see the Approvals link
     // at all (most employees) — see usePendingApprovalsCount.js.
     const pendingApprovalsCount = usePendingApprovalsCount(canSeeApprovals);

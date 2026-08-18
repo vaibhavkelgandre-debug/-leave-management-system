@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { renderWithProviders, makeAuthValue } from "../../tests/renderWithProviders.jsx";
 import { NavBar } from "./NavBar.jsx";
 import { ROLES } from "../../constants/roles.js";
@@ -73,6 +74,17 @@ describe("NavBar", () => {
         expect(screen.queryByRole("link", { name: /leave types/i })).not.toBeInTheDocument();
     });
 
+    it("groups My Team/Approvals/Delegations under a 'Manager' heading, same treatment as HR Admin's group", () => {
+        renderNav(ROLES.MANAGER);
+        expect(screen.getByText("Manager")).toBeInTheDocument();
+    });
+
+    it("shows no 'Manager' heading for a plain EMPLOYEE with no active delegation", async () => {
+        renderNav(ROLES.EMPLOYEE);
+        await waitFor(() => expect(delegationService.getDelegationsAsDelegate).toHaveBeenCalled());
+        expect(screen.queryByText("Manager")).not.toBeInTheDocument();
+    });
+
     it("shows all links for HR_ADMIN", () => {
         renderNav(ROLES.HR_ADMIN);
         expect(screen.getByRole("link", { name: /dashboard/i })).toBeInTheDocument();
@@ -86,6 +98,48 @@ describe("NavBar", () => {
     it("always shows Apply Leave regardless of role", () => {
         renderNav(ROLES.EMPLOYEE);
         expect(screen.getByRole("link", { name: /apply leave/i })).toBeInTheDocument();
+    });
+
+    it("highlights only My Leave, not Apply Leave, on the My Leave route — they're separate pages now, not a shared path with a query flag", () => {
+        renderWithProviders(<NavBar />, {
+            route: "/dashboard/my-leave",
+            authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
+        });
+
+        expect(screen.getByRole("link", { name: /^my leave$/i }).className).toContain("bg-indigo-50");
+        expect(screen.getByRole("link", { name: /apply leave/i }).className).not.toContain("bg-indigo-50");
+    });
+
+    it("highlights only Apply Leave, not My Leave, on the Apply Leave route", () => {
+        renderWithProviders(<NavBar />, {
+            route: "/dashboard/apply-leave",
+            authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
+        });
+
+        expect(screen.getByRole("link", { name: /apply leave/i }).className).toContain("bg-indigo-50");
+        expect(screen.getByRole("link", { name: /^my leave$/i }).className).not.toContain("bg-indigo-50");
+    });
+
+    describe("hover tooltip", () => {
+        it("shows nothing on hover when the sidebar is expanded — the label is already visible as text", async () => {
+            renderNav(ROLES.EMPLOYEE);
+
+            await userEvent.hover(screen.getByRole("link", { name: /apply leave/i }));
+
+            expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
+        });
+
+        it("shows just the item's short label on hover when collapsed, never the longer description", async () => {
+            renderWithProviders(<NavBar collapsed />, {
+                authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
+            });
+
+            await userEvent.hover(screen.getByRole("link", { name: /apply leave/i }));
+
+            const tooltip = await screen.findByRole("tooltip");
+            expect(tooltip).toHaveTextContent("Apply Leave");
+            expect(tooltip).not.toHaveTextContent(/submit a new leave request/i);
+        });
     });
 
     describe("pending-approvals badge", () => {

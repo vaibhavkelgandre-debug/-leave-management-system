@@ -1,4 +1,5 @@
 import { Loader2 } from "lucide-react";
+import { Tooltip } from "./Tooltip.jsx";
 
 const VARIANT_CLASSES = {
     default: "text-slate-500 hover:bg-slate-100 hover:text-slate-700",
@@ -20,23 +21,25 @@ export function IconButton({
     size = "md",
     loading = false,
     disabled = false,
+    tooltipPosition = "top",
     className = "",
     ...rest
 }) {
     return (
-        <button
-            type="button"
-            aria-label={label}
-            title={label}
-            disabled={disabled || loading}
-            className={`inline-flex shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
-            {...rest}
-        >
-            {loading ? (
-                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
-            ) : (
-                <Icon className="h-4 w-4" aria-hidden="true" />
-            )}
-        </button>
+        <Tooltip label={label} position={tooltipPosition} className="inline-flex shrink-0">
+            <button
+                type="button"
+                aria-label={label}
+                disabled={disabled || loading}
+                className={`inline-flex shrink-0 items-center justify-center rounded-full transition disabled:cursor-not-allowed disabled:opacity-50 ${VARIANT_CLASSES[variant]} ${SIZE_CLASSES[size]} ${className}`}
+                {...rest}
+            >
+                {loading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                ) : (
+                    <Icon className="h-4 w-4" aria-hidden="true" />
+                )}
+            </button>
+        </Tooltip>
     );
 }

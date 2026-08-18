@@ -35,4 +35,18 @@ describe("Sidebar", () => {
 
         expect(onCloseMobile).toHaveBeenCalled();
     });
+
+    it("centers the logo row when collapsed — it's the only visible child at that width, since the mobile close button is lg:hidden", () => {
+        renderSidebar({ collapsed: true });
+        const logoLink = screen.getByRole("link", { name: "L" });
+
+        expect(logoLink.parentElement.className).toContain("lg:justify-center");
+    });
+
+    it("doesn't force centering when expanded — the logo lockup naturally left-aligns beside the (still-hidden-on-desktop) close button", () => {
+        renderSidebar({ collapsed: false });
+        const logoLink = screen.getByRole("link", { name: /LMS/i });
+
+        expect(logoLink.parentElement.className).not.toContain("lg:justify-center");
+    });
 });
