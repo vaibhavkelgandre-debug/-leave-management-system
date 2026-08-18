@@ -10,10 +10,11 @@
 // decision can be made right after reading the balance and history, without
 // closing the modal first.
 import { useEffect, useState } from "react";
-import { Download } from "lucide-react";
+import { Download, Eye } from "lucide-react";
 import { Modal } from "../ui/Modal.jsx";
 import { Button } from "../ui/Button.jsx";
 import { StatusBadge } from "../ui/Badge.jsx";
+import { DocumentPreviewModal } from "../ui/DocumentPreviewModal.jsx";
 import { RequestActions } from "./RequestActions.jsx";
 import {
     getLeaveRequestAuditTrail,
@@ -32,6 +33,7 @@ const ACTION_LABELS = {
     CANCEL: "Cancelled",
     HR_OVERRIDE_TO_APPROVED: "Overridden to approved",
     HR_OVERRIDE_TO_REJECTED: "Overridden to rejected",
+    AUTO_APPROVE: "Auto-approved (Super Admin)",
 };
 
 function actorName(entry) {
@@ -62,11 +64,12 @@ function AuditEntryRow({ entry }) {
 // one, the document are fetched lazily on open, each keyed by the request id
 // they were fetched for (same stale-result guard AuditTrail.jsx used) so
 // switching to a different request without unmounting doesn't show a
-// flash of the previous one's data. The document itself is offered as a
-// filename + download link rather than embedded inline — an approver only
-// needs to open/save it, not read it inside this modal.
+// flash of the previous one's data. The document itself offers both a
+// Download link and a View button (DocumentPreviewModal) — an approver can
+// read it right here without leaving this modal, or save a copy either way.
 export function RequestDetailModal({ request, open, onClose, canOverride = false, readOnly = false, onChanged }) {
     const [trailResult, setTrailResult] = useState(null);
+    const [previewingDocument, setPreviewingDocument] = useState(null);
     const [docResult, setDocResult] = useState(null);
     const [balanceResult, setBalanceResult] = useState(null);
 
@@ -146,30 +149,56 @@ export function RequestDetailModal({ request, open, onClose, canOverride = false
                         <p className="mt-1 text-sm text-slate-500">No balance on record for {balanceYear}.</p>
                     )}
                     {!balanceError && balances !== null && balances.length > 0 && (
-                        <ul className="mt-1 space-y-1.5">
-                            {balances.map((balance) => {
-                                const isRequestedType = balance.leave_type_id === request.leave_type_id;
-                                return (
-                                    <li
-                                        key={balance.id}
-                                        className={`flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5 rounded-md px-2 py-1.5 text-sm ${
-                                            isRequestedType ? "border-l-2 border-indigo-400 bg-indigo-50/60" : ""
-                                        }`}
-                                    >
-                                        <span className="font-medium text-slate-800">
-                                            {balance.leave_type_name}
-                                            {isRequestedType && (
-                                                <span className="ml-1.5 text-xs font-normal text-indigo-600">(requested)</span>
-                                            )}
-                                        </span>
-                                        <span className="text-xs text-slate-500">
-                                            {balance.days_remaining} remaining · {balance.entitlement} entitled ·{" "}
-                                            {balance.days_taken} taken · {balance.days_pending} pending
-                                        </span>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        <div className="mt-1 overflow-hidden rounded-md border border-slate-200">
+                            <table className="w-full text-sm">
+                                <thead>
+                                    <tr className="bg-slate-50 text-xs font-semibold tracking-wide text-slate-500 uppercase">
+                                        <th scope="col" className="px-2 py-1.5 text-left">
+                                            Leave Type
+                                        </th>
+                                        <th scope="col" className="px-2 py-1.5 text-right">
+                                            Remaining
+                                        </th>
+                                        <th scope="col" className="px-2 py-1.5 text-right">
+                                            Entitled
+                                        </th>
+                                        <th scope="col" className="px-2 py-1.5 text-right">
+                                            Taken
+                                        </th>
+                                        <th scope="col" className="px-2 py-1.5 text-right">
+                                            Pending
+                                        </th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-slate-100">
+                                    {balances.map((balance) => {
+                                        const isRequestedType = balance.leave_type_id === request.leave_type_id;
+                                        return (
+                                            <tr key={balance.id} className={isRequestedType ? "bg-indigo-50/60" : ""}>
+                                                <td
+                                                    className={`px-2 py-1.5 font-medium text-slate-800 ${
+                                                        isRequestedType ? "border-l-2 border-indigo-400" : ""
+                                                    }`}
+                                                >
+                                                    {balance.leave_type_name}
+                                                    {isRequestedType && (
+                                                        <span className="ml-1.5 text-xs font-normal text-indigo-600">
+                                                            (requested)
+                                                        </span>
+                                                    )}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right text-slate-700">
+                                                    {balance.days_remaining}
+                                                </td>
+                                                <td className="px-2 py-1.5 text-right text-slate-500">{balance.entitlement}</td>
+                                                <td className="px-2 py-1.5 text-right text-slate-500">{balance.days_taken}</td>
+                                                <td className="px-2 py-1.5 text-right text-slate-500">{balance.days_pending}</td>
+                                            </tr>
+                                        );
+                                    })}
+                                </tbody>
+                            </table>
+                        </div>
                     )}
                 </div>
 
@@ -214,20 +243,32 @@ export function RequestDetailModal({ request, open, onClose, canOverride = false
                         {doc && (
                             <div className="mt-1 flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
                                 <span className="min-w-0 truncate text-sm text-slate-700">{doc.filename}</span>
-                                <Button
-                                    as="a"
-                                    href={getLeaveRequestDocumentDownloadUrl(request.id)}
-                                    download={doc.filename}
-                                    variant="secondary"
-                                    size="sm"
-                                    icon={Download}
-                                >
-                                    Download
-                                </Button>
+                                <div className="flex shrink-0 items-center gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        icon={Eye}
+                                        onClick={() => setPreviewingDocument(doc)}
+                                    >
+                                        View
+                                    </Button>
+                                    <Button
+                                        as="a"
+                                        href={getLeaveRequestDocumentDownloadUrl(request.id)}
+                                        download={doc.filename}
+                                        variant="secondary"
+                                        size="sm"
+                                        icon={Download}
+                                    >
+                                        Download
+                                    </Button>
+                                </div>
                             </div>
                         )}
                     </div>
                 )}
+
+                <DocumentPreviewModal document={previewingDocument} onClose={() => setPreviewingDocument(null)} />
 
                 <div>
                     <h3 className="text-xs font-semibold tracking-wide text-slate-500 uppercase">History</h3>

@@ -49,7 +49,7 @@ export function EmployeesPage() {
         <div>
             <PageHeader
                 title="All Employees"
-                description="Grouped by reporting line — each team's own card lists who reports to whom."
+                description="Grouped by reporting line — each team's own card lists who reports to whom. Manage your own team's details from My Team."
                 action={
                     <Button icon={Plus} onClick={() => setShowInviteModal(true)}>
                         Add Employee
@@ -85,6 +85,7 @@ export function EmployeesPage() {
                                         users={users}
                                         onChanged={reload}
                                         showReportsTo
+                                        showActions={false}
                                     />
                                 ))}
                             </ul>
@@ -98,7 +99,13 @@ export function EmployeesPage() {
                         ) : (
                             <div className="mt-3 space-y-4">
                                 {teams.map((team) => (
-                                    <EmployeeTeamCard key={team.manager.id} team={team} users={users} onChanged={reload} />
+                                    <EmployeeTeamCard
+                                        key={team.manager.id}
+                                        team={team}
+                                        users={users}
+                                        onChanged={reload}
+                                        showActions={false}
+                                    />
                                 ))}
                             </div>
                         )}
@@ -116,6 +123,7 @@ export function EmployeesPage() {
                                             users={users}
                                             onChanged={reload}
                                             showReportsTo
+                                            showActions={false}
                                         />
                                     ))}
                                 </ul>

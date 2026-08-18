@@ -13,7 +13,14 @@ const labelClasses = "mb-1 block text-sm font-medium text-slate-700";
 
 function toFormState(leaveType) {
     if (!leaveType) {
-        return { name: "", annualEntitlement: "", accrualType: "UPFRONT", allowNegativeBalance: false, requiresDocument: false };
+        return {
+            name: "",
+            annualEntitlement: "",
+            accrualType: "UPFRONT",
+            allowNegativeBalance: false,
+            requiresDocument: false,
+            countsAsLop: false,
+        };
     }
 
     return {
@@ -22,6 +29,7 @@ function toFormState(leaveType) {
         accrualType: leaveType.accrual_type,
         allowNegativeBalance: leaveType.allow_negative_balance,
         requiresDocument: leaveType.requires_document,
+        countsAsLop: leaveType.counts_as_lop,
     };
 }
 
@@ -120,6 +128,17 @@ export function LeaveTypeForm({ leaveType, onSaved }) {
                     className="rounded border-slate-300"
                 />
                 Supporting document required
+            </label>
+
+            <label className="flex items-center gap-2 text-sm text-slate-700">
+                <input
+                    name="countsAsLop"
+                    type="checkbox"
+                    checked={form.countsAsLop}
+                    onChange={handleChange}
+                    className="rounded border-slate-300"
+                />
+                Counts as loss of pay (LOP) for payroll
             </label>
 
             <Button type="submit" loading={submitting} className="w-full">

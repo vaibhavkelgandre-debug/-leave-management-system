@@ -7,13 +7,19 @@ import { Users } from "lucide-react";
 import { Card } from "../ui/Card.jsx";
 import { EmployeePersonRow } from "./EmployeePersonRow.jsx";
 
-export function EmployeeTeamCard({ team, users, onChanged }) {
+export function EmployeeTeamCard({ team, users, onChanged, showActions = true }) {
     const { manager, reports } = team;
 
     return (
         <Card className="overflow-hidden">
             <ul className="divide-y divide-slate-100">
-                <EmployeePersonRow user={manager} users={users} onChanged={onChanged} className="bg-indigo-50/40" />
+                <EmployeePersonRow
+                    user={manager}
+                    users={users}
+                    onChanged={onChanged}
+                    showActions={showActions}
+                    className="bg-indigo-50/40"
+                />
                 {reports.length === 0 ? (
                     <li className="flex items-center gap-2 px-4 py-3 text-sm text-slate-500">
                         <Users className="h-4 w-4 shrink-0" aria-hidden="true" />
@@ -21,7 +27,13 @@ export function EmployeeTeamCard({ team, users, onChanged }) {
                     </li>
                 ) : (
                     reports.map((report) => (
-                        <EmployeePersonRow key={report.id} user={report} users={users} onChanged={onChanged} />
+                        <EmployeePersonRow
+                            key={report.id}
+                            user={report}
+                            users={users}
+                            onChanged={onChanged}
+                            showActions={showActions}
+                        />
                     ))
                 )}
             </ul>

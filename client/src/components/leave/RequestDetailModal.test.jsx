@@ -135,7 +135,7 @@ describe("RequestDetailModal", () => {
         expect(leaveRequestService.getLeaveRequestDocument).not.toHaveBeenCalled();
     });
 
-    it("shows the document's filename with a download link instead of an inline preview", async () => {
+    it("shows the document's filename with a download link, and no preview until View is clicked", async () => {
         leaveRequestService.getLeaveRequestDocument.mockResolvedValue({
             url: "https://res.cloudinary.com/mock/cert.jpg",
             filename: "cert.jpg",
@@ -148,16 +148,35 @@ describe("RequestDetailModal", () => {
 
         expect(leaveRequestService.getLeaveRequestDocument).toHaveBeenCalledWith("req-1");
         expect(await screen.findByText("cert.jpg")).toBeInTheDocument();
-        // The link goes through this app's own streaming endpoint (forces a
-        // real download via Content-Disposition), not the raw signed
-        // Cloudinary URL — a plain cross-origin link would just navigate
-        // there instead of saving a local copy.
+        // The download link goes through this app's own streaming endpoint
+        // (forces a real download via Content-Disposition), not the raw
+        // signed Cloudinary URL — a plain cross-origin link would just
+        // navigate there instead of saving a local copy.
         expect(screen.getByRole("link", { name: /download/i })).toHaveAttribute(
             "href",
             "http://localhost:5001/api/leave-requests/req-1/document/download"
         );
+        // No preview rendered until View is clicked — the document section
+        // itself is just a filename and two buttons.
         expect(screen.queryByRole("img")).not.toBeInTheDocument();
         expect(document.querySelector("iframe")).not.toBeInTheDocument();
+    });
+
+    it("opens the document in an in-app preview when View is clicked", async () => {
+        leaveRequestService.getLeaveRequestDocument.mockResolvedValue({
+            url: "https://res.cloudinary.com/mock/cert.jpg",
+            filename: "cert.jpg",
+            mimeType: "image/jpeg",
+        });
+        renderWithProviders(<RequestDetailModal request={makeRequest({ has_document: true })} open onClose={vi.fn()} />);
+        await screen.findByText("cert.jpg");
+
+        await userEvent.click(screen.getByRole("button", { name: /^view$/i }));
+
+        expect(screen.getByRole("img", { name: "cert.jpg" })).toHaveAttribute(
+            "src",
+            "https://res.cloudinary.com/mock/cert.jpg"
+        );
     });
 
     it("shows an inline error when the document fails to load", async () => {
@@ -177,10 +196,13 @@ describe("RequestDetailModal", () => {
 
             expect(leaveBalanceService.getUserBalances).toHaveBeenCalledWith("emp-1", { year: 2099 });
             const sickRow = await screen.findByText("Sick Leave");
-            expect(sickRow.closest("li")).toHaveTextContent("(requested)");
+            expect(sickRow.closest("tr")).toHaveTextContent("(requested)");
             const annualRow = screen.getByText("Annual Leave");
-            expect(annualRow.closest("li")).not.toHaveTextContent("(requested)");
-            expect(screen.getByText(/6 remaining/i)).toBeInTheDocument();
+            expect(annualRow.closest("tr")).not.toHaveTextContent("(requested)");
+            // Rendered as a table now (leave type / remaining / entitled /
+            // taken / pending columns), not a combined "6 remaining · ..." string.
+            expect(screen.getByRole("columnheader", { name: /remaining/i })).toBeInTheDocument();
+            expect(sickRow.closest("tr")).toHaveTextContent(/Sick Leave.*6.*10.*2.*2/s);
         });
 
         it("shows a message when the employee has no balance on record for that year", async () => {

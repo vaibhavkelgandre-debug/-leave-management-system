@@ -25,6 +25,20 @@ describe("MyLeaveSummary", () => {
         expect(screen.getByText("8")).toBeInTheDocument();
     });
 
+    it("gives each balance chip a different accent color so leave types don't blend together", async () => {
+        leaveBalanceService.getMyBalances.mockResolvedValue([
+            { id: "b1", leave_type_name: "Casual Leave", days_remaining: "8" },
+            { id: "b2", leave_type_name: "Sick Leave", days_remaining: "10" },
+        ]);
+        leaveRequestService.getMyLeaveRequests.mockResolvedValue([]);
+        renderWithProviders(<MyLeaveSummary />);
+
+        const casualChip = await screen.findByText("Casual Leave");
+        const sickChip = screen.getByText("Sick Leave");
+
+        expect(casualChip.className).not.toBe(sickChip.className);
+    });
+
     it("counts pending requests", async () => {
         leaveBalanceService.getMyBalances.mockResolvedValue([]);
         leaveRequestService.getMyLeaveRequests.mockResolvedValue([
@@ -33,7 +47,8 @@ describe("MyLeaveSummary", () => {
         ]);
         renderWithProviders(<MyLeaveSummary />);
 
-        expect(await screen.findByText("2 requests waiting on a decision.")).toBeInTheDocument();
+        expect(await screen.findByText("2")).toBeInTheDocument();
+        expect(screen.getByText(/waiting on a decision/i)).toBeInTheDocument();
     });
 
     it("shows the soonest upcoming approved leave", async () => {
@@ -50,7 +65,8 @@ describe("MyLeaveSummary", () => {
         ]);
         renderWithProviders(<MyLeaveSummary />);
 
-        expect(await screen.findByText(/next leave: annual leave/i)).toBeInTheDocument();
+        expect(await screen.findByText(/next leave/i)).toBeInTheDocument();
+        expect(screen.getByText(/annual leave/i)).toBeInTheDocument();
     });
 
     it("shows the most recent decision on one of the user's requests", async () => {

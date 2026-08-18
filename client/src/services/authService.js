@@ -1,16 +1,17 @@
 import apiClient, { unwrap } from "./apiClient.js";
 import { toHttpError } from "./httpError.js";
 
+// Passes every field on the raw user row through as-is — the auth context's
+// `user` is read directly by ProfilePage/ProfileForm (all the Module 5
+// profile fields, `profile_status`, etc.), so trimming it down to a fixed
+// allowlist here silently breaks any field added later. `role` is the one
+// field actually normalized: some endpoints have historically returned it
+// as a nested `{ role_name }` object rather than a plain string.
 export function normalizeUser(raw) {
     if (!raw) return null;
     return {
-        id: raw.id,
-        first_name: raw.first_name,
-        last_name: raw.last_name,
-        email: raw.email,
+        ...raw,
         role: raw.role?.role_name ?? raw.role_name ?? raw.role ?? null,
-        manager_id: raw.manager_id ?? null,
-        status: raw.status ?? null,
     };
 }
 
@@ -33,20 +34,6 @@ export async function loginWithGoogle(idToken) {
         const response = await apiClient.post(
             "/auth/google",
             { idToken },
-            { skipAuthRedirect: true }
-        );
-        const data = unwrap(response);
-        return normalizeUser(data?.user);
-    } catch (error) {
-        throw toHttpError(error);
-    }
-}
-
-export async function loginWithGithub(code) {
-    try {
-        const response = await apiClient.post(
-            "/auth/github",
-            { code },
             { skipAuthRedirect: true }
         );
         const data = unwrap(response);

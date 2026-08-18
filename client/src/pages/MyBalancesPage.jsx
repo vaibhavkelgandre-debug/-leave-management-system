@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { getMyBalances } from "../services/leaveBalanceService.js";
 import { getMyLeaveRequests } from "../services/leaveRequestService.js";
@@ -19,6 +19,18 @@ const currentYear = new Date().getFullYear();
 const YEAR_OPTIONS = [currentYear - 1, currentYear, currentYear + 1];
 
 export function MyBalancesPage() {
+    // Set when arriving here right after submitting a request from
+    // ApplyLeavePage (its own route, not a query param — a search-only
+    // navigation wouldn't remount this page or re-run this lazy init at
+    // all), so the calendar can open already showing the right month/year.
+    const location = useLocation();
+    const initialFocusDate = location.state?.focusDate ?? null;
+    // Set when arriving here from a notification click (NotificationBell.jsx)
+    // — same "router state, not a query param" reasoning as focusDate above,
+    // so MyLeaveRequestList can auto-open that request's detail modal on
+    // this fresh mount without a calendar click also popping it open.
+    const notificationRequestId = location.state?.selectedRequestId ?? null;
+
     const [balances, setBalances] = useState([]);
     const [year, setYear] = useState(currentYear);
     // Tracks which year `balances` actually belongs to, so "loading" can be
@@ -33,36 +45,25 @@ export function MyBalancesPage() {
     // The personal calendar (FR-022) owns its own month/year navigation,
     // independent of the balance-year selector above — holidays are fetched
     // per whichever year the calendar is currently showing.
-    const [calendarYear, setCalendarYear] = useState(currentYear);
+    const [calendarYear, setCalendarYear] = useState(() =>
+        initialFocusDate ? Number(initialFocusDate.slice(0, 4)) : currentYear
+    );
     const [holidays, setHolidays] = useState([]);
     const [loadedHolidayYear, setLoadedHolidayYear] = useState(null);
 
     // Set when a leave request is clicked on the calendar, so the matching
-    // row can be highlighted and scrolled into view in the list beside it.
-    const [selectedRequestId, setSelectedRequestId] = useState(null);
+    // row can be highlighted and scrolled into view in the list beside it —
+    // also seeded from a notification click so that row starts highlighted too.
+    const [selectedRequestId, setSelectedRequestId] = useState(notificationRequestId);
     // Set right after submitting a new request so the calendar can jump to
     // it — the calendar itself owns month-to-month navigation otherwise.
-    const [focusDate, setFocusDate] = useState(null);
+    const [focusDate, setFocusDate] = useState(initialFocusDate);
 
-    // The sidebar's "Apply Leave" item links here with ?apply=1 so it opens
-    // the form immediately instead of landing on the page and requiring a
-    // second click. Read once via lazy init (not an effect) so there's no
-    // setState-in-effect to worry about; the query param itself is stripped
-    // right after, in an effect that only touches router state.
-    const [searchParams, setSearchParams] = useSearchParams();
-    const [showRequestForm, setShowRequestForm] = useState(() => searchParams.get("apply") === "1");
-
-    useEffect(() => {
-        if (searchParams.has("apply")) {
-            setSearchParams(
-                (params) => {
-                    params.delete("apply");
-                    return params;
-                },
-                { replace: true }
-            );
-        }
-    }, [searchParams, setSearchParams]);
+    const [showRequestForm, setShowRequestForm] = useState(false);
+    // Beyond a handful of leave types, a full card grid pushes everything
+    // else on the page below the fold — collapsed to the first 6 by default,
+    // with a toggle to reveal the rest.
+    const [showAllBalances, setShowAllBalances] = useState(false);
 
     // Bumped after a request is submitted/withdrawn/cancelled, to re-trigger
     // both fetch effects — a request always changes both the balance and the
@@ -201,14 +202,23 @@ export function MyBalancesPage() {
             )}
 
             {!loading && !loadError && balances.length > 0 && (
-                <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                    {balances.map((balance, index) => (
-                        <LeaveBalanceCard
-                            key={balance.id}
-                            balance={balance}
-                            accent={LEAVE_BALANCE_ACCENTS[index % LEAVE_BALANCE_ACCENTS.length]}
-                        />
-                    ))}
+                <div className="mt-6">
+                    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                        {(showAllBalances ? balances : balances.slice(0, 6)).map((balance, index) => (
+                            <LeaveBalanceCard
+                                key={balance.id}
+                                balance={balance}
+                                accent={LEAVE_BALANCE_ACCENTS[index % LEAVE_BALANCE_ACCENTS.length]}
+                            />
+                        ))}
+                    </div>
+                    {balances.length > 6 && (
+                        <div className="mt-4 flex justify-center">
+                            <Button variant="secondary" size="sm" onClick={() => setShowAllBalances((prev) => !prev)}>
+                                {showAllBalances ? "Show less" : `Show all ${balances.length} leave types`}
+                            </Button>
+                        </div>
+                    )}
                 </div>
             )}
 
@@ -254,6 +264,7 @@ export function MyBalancesPage() {
                                 requests={myRequests}
                                 onChanged={reload}
                                 selectedRequestId={selectedRequestId}
+                                autoOpenRequestId={notificationRequestId}
                             />
                         </div>
                     )}

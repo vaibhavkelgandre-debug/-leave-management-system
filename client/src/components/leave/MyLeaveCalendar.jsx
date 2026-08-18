@@ -141,7 +141,11 @@ export function MyLeaveCalendar({ requests, holidays, onActiveYearChange, focusD
                 initialView="dayGridMonth"
                 headerToolbar={{ left: "prev", center: "title", right: "next" }}
                 dayHeaderFormat={{ weekday: "short" }}
-                aspectRatio={1.15}
+                // `height="auto"` instead of a fixed `aspectRatio`-derived
+                // height — lets the grid grow to fit every week/event
+                // instead of scrolling internally to stay within a fixed
+                // pixel height (see TeamLeaveCalendar.jsx's fuller note).
+                height="auto"
                 firstDay={1}
                 events={[...leaveEvents, ...holidayEvents]}
                 eventDidMount={handleEventDidMount}

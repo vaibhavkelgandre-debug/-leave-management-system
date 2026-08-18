@@ -30,3 +30,51 @@ export async function updateStatus(userId, status) {
     const response = await apiClient.patch(`/users/${userId}/status`, { status });
     return unwrap(response);
 }
+
+export async function getUserById(userId) {
+    const response = await apiClient.get(`/users/${userId}`);
+    return unwrap(response);
+}
+
+export async function updateMyProfile(fields) {
+    const response = await apiClient.patch("/users/me/profile", fields);
+    return unwrap(response);
+}
+
+export async function changeMyPassword(currentPassword, newPassword) {
+    const response = await apiClient.post("/users/me/password", { currentPassword, newPassword });
+    return unwrap(response);
+}
+
+export async function submitProfileForVerification() {
+    const response = await apiClient.post("/employees/me/profile/submit");
+    return unwrap(response);
+}
+
+export async function getPendingVerification() {
+    const response = await apiClient.get("/employees/pending-verification");
+    return unwrap(response);
+}
+
+// Not getUserById (`/users/:id`) — that route lets any HR admin view any
+// user company-wide; this one is scoped to the caller's own reporting
+// subtree, matching every other HR-scoped action in this app.
+export async function getEmployeeForVerification(employeeId) {
+    const response = await apiClient.get(`/employees/${employeeId}`);
+    return unwrap(response);
+}
+
+export async function getVerifiedEmployees() {
+    const response = await apiClient.get("/employees/verified");
+    return unwrap(response);
+}
+
+export async function verifyEmployeeProfile(employeeId) {
+    const response = await apiClient.post(`/employees/${employeeId}/verify`);
+    return unwrap(response);
+}
+
+export async function sendProfileBack(employeeId, reason) {
+    const response = await apiClient.post(`/employees/${employeeId}/send-back`, { reason });
+    return unwrap(response);
+}

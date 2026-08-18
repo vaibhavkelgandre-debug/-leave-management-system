@@ -131,7 +131,14 @@ export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, sele
                 initialView="dayGridMonth"
                 headerToolbar={{ left: "prev", center: "title", right: "next" }}
                 dayHeaderFormat={{ weekday: "short" }}
-                aspectRatio={1.4}
+                // `aspectRatio` (the old setting here) derives a *fixed*
+                // pixel height from the container's width, which forces
+                // FullCalendar to scroll internally once a month's rows (each
+                // stacking several employees' bars) need more room than that
+                // fixed height allows. `height="auto"` instead lets the whole
+                // grid grow to fit every week/event — no internal scrollbar,
+                // the complete month is always visible at once.
+                height="auto"
                 firstDay={1}
                 dayMaxEvents={3}
                 events={[...requestEvents, ...holidayEvents]}

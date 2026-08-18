@@ -29,6 +29,18 @@ function makeRequest(overrides = {}) {
     };
 }
 
+function makeBalance(overrides = {}) {
+    return {
+        id: 1,
+        leave_type_name: "Leave Type",
+        entitlement: "10",
+        days_taken: "0",
+        days_pending: "0",
+        days_remaining: "10",
+        ...overrides,
+    };
+}
+
 describe("MyBalancesPage", () => {
     beforeEach(() => {
         vi.clearAllMocks();
@@ -68,5 +80,34 @@ describe("MyBalancesPage", () => {
         await screen.findByText("My requests");
 
         expect(holidayService.getHolidays).toHaveBeenCalledWith({ year: new Date().getFullYear() });
+    });
+
+    it("opens the calendar on the focused request's year when arriving via ApplyLeavePage's router state", async () => {
+        renderWithProviders(<MyBalancesPage />, {
+            initialEntries: [{ pathname: "/", state: { focusDate: "2031-03-15" } }],
+        });
+        await screen.findByText("My requests");
+
+        expect(holidayService.getHolidays).toHaveBeenCalledWith({ year: 2031 });
+    });
+
+    it("shows only 6 balance cards by default, revealing the rest via the toggle", async () => {
+        const balances = Array.from({ length: 8 }, (_, index) =>
+            makeBalance({ id: index + 1, leave_type_name: `Leave Type ${index + 1}` })
+        );
+        leaveBalanceService.getMyBalances.mockResolvedValue(balances);
+        renderWithProviders(<MyBalancesPage />);
+
+        expect(await screen.findByText("Leave Type 6")).toBeInTheDocument();
+        expect(screen.queryByText("Leave Type 7")).not.toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole("button", { name: "Show all 8 leave types" }));
+
+        expect(screen.getByText("Leave Type 7")).toBeInTheDocument();
+        expect(screen.getByText("Leave Type 8")).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole("button", { name: "Show less" }));
+
+        expect(screen.queryByText("Leave Type 7")).not.toBeInTheDocument();
     });
 });
