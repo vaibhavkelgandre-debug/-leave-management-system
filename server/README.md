@@ -84,7 +84,7 @@ Integration tests hit the real `_test` database defined in `.env.test` — they 
 src/
   app.js              Express app (middleware, route mounting)
   server.js           HTTP server entrypoint
-  config/             DB pool, Google/GitHub OAuth clients
+  config/             DB pool, Google OAuth client
   sql/                Numbered migrations (001_..., applied in order)
   scripts/            runMigrations.js
   repositories/       Raw parameterized SQL queries, one file per table

@@ -5,14 +5,15 @@ import { getUserById } from "../services/userService.js";
 import { sendSuccess } from "../utils/apiResponse.js";
 import { setAuthCookie, clearAuthCookie } from "../utils/cookies.js";
 
-// One-time bootstrap endpoint for creating the very first HR_ADMIN account using the
-// shared registration code — there is no public sign-up, so this is the only way an
-// HR account gets created outside of an invite.
+// One-time bootstrap endpoint for creating the single SUPER_ADMIN account
+// using the shared registration code — there is no public sign-up, so this is
+// the only way into the system before any invites exist. Singleton-guarded in
+// authService.registerHrRoot: a second call is rejected once one exists.
 export async function registerHrAdmin(req, res, next) {
     try {
         const { token, user } = await authService.registerHrRoot(req.body);
         setAuthCookie(res, token);
-        sendSuccess(res, 201, "HR admin registered", { user });
+        sendSuccess(res, 201, "Super admin registered", { user });
     } catch (error) {
         next(error);
     }
@@ -41,18 +42,6 @@ export async function googleLogin(req, res, next) {
     }
 }
 
-// Alternative login method via GitHub OAuth — only signs in users who already have an
-// account, same rule as googleLogin; never creates new accounts.
-export async function githubLogin(req, res, next) {
-    try {
-        const { token, user } = await authService.loginWithGithub(req.body.code);
-        setAuthCookie(res, token);
-        sendSuccess(res, 200, "Logged in", { user });
-    } catch (error) {
-        next(error);
-    }
-}
-
 // Ends the session by clearing the auth cookie; there's no server-side token to
 // invalidate since auth is stateless JWT-in-cookie.
 export async function logout(req, res) {
@@ -64,7 +53,7 @@ export async function logout(req, res) {
 // request's token — used by the client to hydrate session state on load/refresh.
 export async function getCurrentUser(req, res, next) {
     try {
-        const user = await getUserById(req.user.id);
+        const user = await getUserById(req.user.id, req.user);
         sendSuccess(res, 200, "Current user", { user });
     } catch (error) {
         next(error);

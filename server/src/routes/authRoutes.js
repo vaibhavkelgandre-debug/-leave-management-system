@@ -3,7 +3,6 @@ import {
     registerHrAdmin,
     login,
     googleLogin,
-    githubLogin,
     logout,
     getCurrentUser,
     verifyInvitation,
@@ -17,7 +16,6 @@ import {
     registerHrSchema,
     loginSchema,
     googleLoginSchema,
-    githubLoginSchema,
     verifyInviteSchema,
     acceptInviteSchema,
     requestPasswordResetSchema,
@@ -29,7 +27,6 @@ const router = express.Router();
 router.post("/register/hr", validateBody(registerHrSchema), registerHrAdmin);
 router.post("/login", validateBody(loginSchema), login);
 router.post("/google", validateBody(googleLoginSchema), googleLogin);
-router.post("/github", validateBody(githubLoginSchema), githubLogin);
 router.post("/logout", logout);
 // Only this route needs requireAuth explicitly — it's the one place a caller
 // asks "who am I" using their existing session, the rest of the auth routes are pre-login.

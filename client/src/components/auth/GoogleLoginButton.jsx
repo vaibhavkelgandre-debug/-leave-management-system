@@ -7,7 +7,7 @@ import { GoogleLogin } from "@react-oauth/google";
 //
 // Google's rendered button only takes a fixed pixel `width`, not a
 // percentage like our own buttons' `w-full` — so to keep it visually the
-// same size as the Sign in/GitHub buttons around it, this measures its own
+// same size as the Sign in button above it, this measures its own
 // container and re-renders at that width whenever it changes. ResizeObserver
 // isn't available in the jsdom test environment; falling back to `undefined`
 // (the library's own default) there is harmless since tests mock GoogleLogin

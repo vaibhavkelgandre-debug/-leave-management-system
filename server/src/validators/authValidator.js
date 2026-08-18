@@ -15,12 +15,6 @@ export const googleLoginSchema = z.object({
     idToken: z.string().min(1, "idToken is required"),
 });
 
-// GitHub OAuth sign-in exchanges an authorization code (not an ID token like
-// Google) for a session, so this schema only needs to confirm one was sent.
-export const githubLoginSchema = z.object({
-    code: z.string().min(1, "code is required"),
-});
-
 // Enforces the "no public registration" rule: an HR admin account can only be
 // created by someone who has the secret registration code.
 export const registerHrSchema = z.object({
