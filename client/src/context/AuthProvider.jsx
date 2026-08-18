@@ -53,12 +53,6 @@ export function AuthProvider({ children }) {
         return loggedInUser;
     }, []);
 
-    const loginWithGithub = useCallback(async (code) => {
-        const loggedInUser = await authService.loginWithGithub(code);
-        setUser(loggedInUser);
-        return loggedInUser;
-    }, []);
-
     const logout = useCallback(async () => {
         try {
             await authService.logout();
@@ -94,11 +88,10 @@ export function AuthProvider({ children }) {
             hasAnyRole,
             login,
             loginWithGoogle,
-            loginWithGithub,
             logout,
             refreshUser,
         }),
-        [user, isInitializing, error, hasAnyRole, login, loginWithGoogle, loginWithGithub, logout, refreshUser]
+        [user, isInitializing, error, hasAnyRole, login, loginWithGoogle, logout, refreshUser]
     );
 
     return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

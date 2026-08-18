@@ -77,6 +77,37 @@ export async function findActiveDelegatedManagerIds(delegateId, onDate) {
     return result.rows.map((row) => row.manager_id);
 }
 
+// Input: a "YYYY-MM-DD" date. Output: every delegation whose window begins
+// that day, joined against the delegate's name — backs
+// notificationSweepService.js's daily check for "should the manager be told
+// their delegate's coverage starts today" (a time-based trigger, unlike
+// every other notification in this app, which fires from a request handler).
+export async function findDelegationsStartingOn(date) {
+    const result = await pool.query(
+        `SELECT d.id, d.manager_id, d.delegate_id, d.start_date, d.end_date,
+                u.first_name AS delegate_first_name, u.last_name AS delegate_last_name
+         FROM delegations d
+         JOIN users u ON u.id = d.delegate_id
+         WHERE d.start_date = $1`,
+        [date]
+    );
+    return result.rows;
+}
+
+// The flip side of findDelegationsStartingOn — every delegation whose
+// window ends that day.
+export async function findDelegationsEndingOn(date) {
+    const result = await pool.query(
+        `SELECT d.id, d.manager_id, d.delegate_id, d.start_date, d.end_date,
+                u.first_name AS delegate_first_name, u.last_name AS delegate_last_name
+         FROM delegations d
+         JOIN users u ON u.id = d.delegate_id
+         WHERE d.end_date = $1`,
+        [date]
+    );
+    return result.rows;
+}
+
 // FR-020's overlap guard: two delegations for the *same* manager must not
 // have overlapping date ranges, or "who's the active delegate today" would be
 // ambiguous. Same interval-overlap test already used for holidays.

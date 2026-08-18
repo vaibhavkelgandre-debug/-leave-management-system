@@ -1,9 +1,18 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, makeAuthValue } from "../../tests/renderWithProviders.jsx";
 import { TopBar } from "./TopBar.jsx";
 import { ROLES } from "../../constants/roles.js";
+import * as notificationService from "../../services/notificationService.js";
+
+// TopBar now renders NotificationBell.jsx, which fetches its own unread
+// count on mount (useUnreadNotificationCount.js) — same reasoning as every
+// other component in this app that owns its own fetch (see
+// TeamOverviewSummary.test.jsx), this file's tests aren't about the bell
+// itself (see NotificationBell.test.jsx for that), so its calls are just
+// stubbed to an empty/zero state here.
+vi.mock("../../services/notificationService.js");
 
 function renderTopBar(overrides = {}) {
     const logout = vi.fn().mockResolvedValue();
@@ -17,9 +26,14 @@ function renderTopBar(overrides = {}) {
 }
 
 describe("TopBar", () => {
-    it("shows the current page's title", () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+        notificationService.getUnreadNotificationCount.mockResolvedValue(0);
+    });
+
+    it("renders no page-title heading of its own — every page's own PageHeader owns that", () => {
         renderTopBar();
-        expect(screen.getByRole("heading", { name: /dashboard/i })).toBeInTheDocument();
+        expect(screen.queryByRole("heading")).not.toBeInTheDocument();
     });
 
     it("filters nav items as the user types in the search box", async () => {
@@ -42,5 +56,17 @@ describe("TopBar", () => {
         await userEvent.click(screen.getByRole("button", { name: /logout/i }));
 
         expect(logout).toHaveBeenCalled();
+    });
+
+    it("opens a dropdown from the identity block with a Profile details link and a Change password action", async () => {
+        renderTopBar();
+
+        expect(screen.queryByRole("link", { name: /profile details/i })).not.toBeInTheDocument();
+        await userEvent.click(screen.getByRole("button", { name: /asha employee/i }));
+
+        expect(screen.getByRole("link", { name: /profile details/i })).toHaveAttribute("href", "/dashboard/profile");
+
+        await userEvent.click(screen.getByRole("button", { name: /change password/i }));
+        expect(await screen.findByRole("dialog", { name: /change password/i })).toBeInTheDocument();
     });
 });

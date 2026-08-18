@@ -9,6 +9,7 @@ import {
     findOverlappingDelegationForManager,
 } from "../repositories/delegationRepository.js";
 import { findUserById } from "../repositories/userRepository.js";
+import { notifyDelegationNominated } from "./notificationService.js";
 import { badRequest, conflict } from "../utils/appError.js";
 
 // Input: the manager's id and `{ delegateId, startDate, endDate }`. Output:
@@ -31,7 +32,9 @@ export async function createDelegation(managerId, { delegateId, startDate, endDa
         throw conflict("You already have a delegation covering one or more of these dates");
     }
 
-    return insertDelegation({ managerId, delegateId, startDate, endDate });
+    const delegation = await insertDelegation({ managerId, delegateId, startDate, endDate });
+    await notifyDelegationNominated(delegation); // non-critical side effect
+    return delegation;
 }
 
 // Output: every delegation this manager has ever nominated.
