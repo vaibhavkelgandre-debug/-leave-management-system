@@ -3,8 +3,8 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../../hooks/useAuth.js";
 import { validateLoginForm } from "../../utils/validation.js";
 import { GoogleLoginButton } from "./GoogleLoginButton.jsx";
-import { GithubLoginButton } from "./GithubLoginButton.jsx";
 import { Button } from "../ui/Button.jsx";
+import { PasswordInput } from "../ui/PasswordInput.jsx";
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -103,10 +103,9 @@ export function LoginForm() {
                             Forgot password?
                         </Link>
                     </div>
-                    <input
+                    <PasswordInput
                         id="password"
                         name="password"
-                        type="password"
                         autoComplete="current-password"
                         value={values.password}
                         onChange={handleChange}
@@ -133,7 +132,6 @@ export function LoginForm() {
             </div>
 
             <GoogleLoginButton onSuccess={handleGoogleSuccess} onError={handleGoogleError} />
-            <GithubLoginButton />
         </div>
     );
 }

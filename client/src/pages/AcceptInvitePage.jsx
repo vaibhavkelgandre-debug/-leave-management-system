@@ -5,6 +5,7 @@ import { useAuth } from "../hooks/useAuth.js";
 import * as authService from "../services/authService.js";
 import { Card } from "../components/ui/Card.jsx";
 import { Button } from "../components/ui/Button.jsx";
+import { PasswordInput } from "../components/ui/PasswordInput.jsx";
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -102,9 +103,8 @@ export function AcceptInvitePage() {
                         <label htmlFor="new-password" className={labelClasses}>
                             Password
                         </label>
-                        <input
+                        <PasswordInput
                             id="new-password"
-                            type="password"
                             autoComplete="new-password"
                             value={password}
                             onChange={(event) => setPassword(event.target.value)}
@@ -116,9 +116,8 @@ export function AcceptInvitePage() {
                         <label htmlFor="confirm-password" className={labelClasses}>
                             Confirm password
                         </label>
-                        <input
+                        <PasswordInput
                             id="confirm-password"
-                            type="password"
                             autoComplete="new-password"
                             value={confirmPassword}
                             onChange={(event) => setConfirmPassword(event.target.value)}

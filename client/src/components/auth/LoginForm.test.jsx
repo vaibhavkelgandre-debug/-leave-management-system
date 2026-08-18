@@ -64,11 +64,4 @@ describe("LoginForm", () => {
 
         expect(authValue.loginWithGoogle).toHaveBeenCalledWith("fake-google-id-token");
     });
-
-    it("offers a GitHub sign-in option alongside Google", () => {
-        const authValue = makeAuthValue();
-        renderWithProviders(<LoginForm />, { authValue });
-
-        expect(screen.getByRole("button", { name: /sign in with github/i })).toBeInTheDocument();
-    });
 });
