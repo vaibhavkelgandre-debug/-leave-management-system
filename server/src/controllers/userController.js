@@ -29,7 +29,7 @@ export async function getUsers(req, res, next) {
 export async function getMyTeam(req, res, next) {
     try {
         const team = await reportingService.getTeam(req.user.id);
-        sendSuccess(res, 200, "Team retrieved", team);
+        sendSuccess(res, 200, "Team retrieved", userService.maskSensitiveProfileFieldsForList(team, req.user));
     } catch (error) {
         next(error);
     }
@@ -38,7 +38,7 @@ export async function getMyTeam(req, res, next) {
 // Fetches a single user's profile by id, e.g. for HR/manager detail views.
 export async function getUserById(req, res, next) {
     try {
-        const user = await userService.getUserById(req.params.id);
+        const user = await userService.getUserById(req.params.id, req.user);
         sendSuccess(res, 200, "User retrieved", user);
     } catch (error) {
         next(error);
@@ -63,6 +63,29 @@ export async function updateStatus(req, res, next) {
     try {
         const user = await userService.changeStatus(req.params.id, req.body.status, req.user);
         sendSuccess(res, 200, "Status updated", user);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Self-service profile edit (Module 5, FR-026) — always the caller's own
+// record, never masked (editing your own profile is always "self").
+export async function updateMyProfile(req, res, next) {
+    try {
+        const user = await userService.updateMyProfile(req.user.id, req.body);
+        sendSuccess(res, 200, "Profile updated", user);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Authenticated change-password — distinct from the forgot-password reset
+// flow (passwordResetService.js), which doesn't require knowing the current
+// password.
+export async function changePassword(req, res, next) {
+    try {
+        await userService.changeMyPassword(req.user.id, req.body);
+        sendSuccess(res, 200, "Password changed", null);
     } catch (error) {
         next(error);
     }

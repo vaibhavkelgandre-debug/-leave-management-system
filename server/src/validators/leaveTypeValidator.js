@@ -13,6 +13,9 @@ export const createLeaveTypeSchema = z.object({
     accrualType: z.enum(["UPFRONT", "MONTHLY"]),
     allowNegativeBalance: z.boolean().optional().default(false),
     requiresDocument: z.boolean().optional().default(false),
+    // Module 5 v2: flags this leave type as unpaid for payroll purposes
+    // (e.g. a "Loss of Pay" leave type) — see salarySlipService.js.
+    countsAsLop: z.boolean().optional().default(false),
 });
 
 export const updateLeaveTypeSchema = createLeaveTypeSchema;

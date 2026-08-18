@@ -21,19 +21,19 @@ const router = express.Router();
 
 router.use(requireAuth);
 
-router.post("/", requireRole("HR_ADMIN"), validateBody(createLeaveTypeSchema), createLeaveType);
+router.post("/", requireRole("HR_ADMIN", "SUPER_ADMIN"), validateBody(createLeaveTypeSchema), createLeaveType);
 router.get("/", validateQuery(listLeaveTypesQuerySchema), getLeaveTypes);
 router.get("/:id", validateParams(leaveTypeIdParamSchema), getLeaveTypeById);
 router.patch(
     "/:id",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateParams(leaveTypeIdParamSchema),
     validateBody(updateLeaveTypeSchema),
     updateLeaveType
 );
 router.patch(
     "/:id/status",
-    requireRole("HR_ADMIN"),
+    requireRole("HR_ADMIN", "SUPER_ADMIN"),
     validateParams(leaveTypeIdParamSchema),
     validateBody(updateLeaveTypeStatusSchema),
     updateLeaveTypeStatus

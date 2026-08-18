@@ -14,7 +14,8 @@ export async function createLeaveType(req, res, next) {
 // requests, so non-HR callers never see deactivated types in list views.
 export async function getLeaveTypes(req, res, next) {
     try {
-        const includeInactive = req.query.includeInactive && req.user.role === "HR_ADMIN";
+        const includeInactive =
+            req.query.includeInactive && (req.user.role === "HR_ADMIN" || req.user.role === "SUPER_ADMIN");
         const leaveTypes = await leaveTypeService.listLeaveTypes(includeInactive);
         sendSuccess(res, 200, "Leave types retrieved", leaveTypes);
     } catch (error) {

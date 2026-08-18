@@ -10,3 +10,10 @@ export const uploadLeaveRequestDocument = multer({
     storage: multer.memoryStorage(),
     limits: { fileSize: MAX_FILE_SIZE_BYTES },
 }).single("document");
+
+// Same shape as uploadLeaveRequestDocument, for the two profile-onboarding
+// documents (Module 5 v2, employeeDocumentService.js).
+export const uploadEmployeeDocument = multer({
+    storage: multer.memoryStorage(),
+    limits: { fileSize: MAX_FILE_SIZE_BYTES },
+}).single("file");

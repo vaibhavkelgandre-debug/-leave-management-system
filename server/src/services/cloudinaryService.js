@@ -5,26 +5,23 @@ import { randomUUID } from "node:crypto";
 import { Readable } from "node:stream";
 import cloudinary from "../config/cloudinary.js";
 
-const FOLDER = "leave-request-documents";
+const LEAVE_REQUEST_DOCUMENTS_FOLDER = "leave-request-documents";
+const EMPLOYEE_DOCUMENTS_FOLDER = "employee-documents";
 const SIGNED_URL_TTL_SECONDS = 5 * 60;
 
-// Input: a file buffer (from multer's memory storage) and the mime type
-// detected from its content. Output: `{ publicId, resourceType }` for the
-// stored asset. Uploaded as `type: "authenticated"` so the asset is never
-// reachable via a plain Cloudinary URL — only through a signed link this app
-// generates after its own authorization check (see getSignedDocumentUrl
-// below). Deliberately called *before* the leave request row is inserted
-// (see submitLeaveRequest in leaveRequestService.js) so a Cloudinary failure
-// never leaves a half-created request behind — there's nothing to roll back
-// because nothing was written to Postgres yet. Failure mode: rejects if
-// Cloudinary's upload fails (network/credentials/quota).
-export async function uploadLeaveRequestDocument({ buffer, mimeType }) {
+// Shared by uploadLeaveRequestDocument/uploadEmployeeDocument below — only
+// the folder differs between the two document kinds. Uploaded as
+// `type: "authenticated"` so the asset is never reachable via a plain
+// Cloudinary URL — only through a signed link this app generates after its
+// own authorization check (see getSignedDocumentUrl below). Failure mode:
+// rejects if Cloudinary's upload fails (network/credentials/quota).
+async function uploadPrivateAsset({ buffer, mimeType, folder }) {
     const resourceType = mimeType === "application/pdf" ? "raw" : "image";
 
     const result = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
             {
-                folder: FOLDER,
+                folder,
                 public_id: randomUUID(),
                 resource_type: resourceType,
                 type: "authenticated",
@@ -35,6 +32,32 @@ export async function uploadLeaveRequestDocument({ buffer, mimeType }) {
     });
 
     return { publicId: result.public_id, resourceType: result.resource_type };
+}
+
+// Input: a file buffer (from multer's memory storage) and the mime type
+// detected from its content. Output: `{ publicId, resourceType }` for the
+// stored asset. Deliberately called *before* the leave request row is
+// inserted (see submitLeaveRequest in leaveRequestService.js) so a
+// Cloudinary failure never leaves a half-created request behind — there's
+// nothing to roll back because nothing was written to Postgres yet.
+export async function uploadLeaveRequestDocument({ buffer, mimeType }) {
+    return uploadPrivateAsset({ buffer, mimeType, folder: LEAVE_REQUEST_DOCUMENTS_FOLDER });
+}
+
+// Same shape as uploadLeaveRequestDocument, for the two profile-onboarding
+// documents (employeeDocumentService.js) — a different folder, otherwise
+// identical private-asset handling.
+export async function uploadEmployeeDocument({ buffer, mimeType }) {
+    return uploadPrivateAsset({ buffer, mimeType, folder: EMPLOYEE_DOCUMENTS_FOLDER });
+}
+
+// Input: the stored `cloudinary_public_id`/`cloudinary_resource_type` for a
+// document. Output: nothing — removes the asset from Cloudinary storage.
+// Only used when a document row is actually deleted (custom/'OTHER'
+// employee documents), unlike every other document flow in this app, which
+// never deletes and so never needs this.
+export async function deletePrivateAsset(publicId, resourceType) {
+    await cloudinary.uploader.destroy(publicId, { resource_type: resourceType, type: "authenticated" });
 }
 
 // Input: the stored `cloudinary_public_id`/`cloudinary_resource_type` for a

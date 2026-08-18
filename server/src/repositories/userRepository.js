@@ -8,6 +8,12 @@ import pool from "../config/db.js";
 // through a path with no invitation row at all (the root HR_ADMIN via
 // POST /auth/register/hr) — used by userService.changeManager to restrict
 // who may edit an HR_ADMIN's own reporting line to whoever created them.
+// Profile columns (phone through bank_name) are added here unconditionally
+// for every reader of this shape — masking pan_number/aadhar_number/
+// bank_account_number/bank_ifsc_code/bank_name for a manager viewing a
+// report is a row-level authorization decision, so it belongs in
+// userService.js (maskSensitiveProfileFields), not here. Repositories stay
+// pure SQL, no business rules, matching the rest of this file.
 const PUBLIC_USER_COLUMNS = `
     u.id,
     u.first_name,
@@ -17,10 +23,77 @@ const PUBLIC_USER_COLUMNS = `
     u.manager_id,
     u.department_id,
     u.status,
+    u.employee_code,
+    u.designation,
+    u.department,
+    u.phone,
+    u.date_of_birth,
+    u.highest_education,
+    u.passport_number,
+    u.passport_expiry_date,
+    u.joining_date,
+    u.last_working_day,
+    u.blood_group,
+    u.marital_status,
+    u.current_address,
+    u.permanent_address,
+    u.nearest_airport,
+    u.health_problem,
+    u.health_insurance_status,
+    u.emergency_contact_1_phone,
+    u.emergency_contact_1_relationship,
+    u.emergency_contact_2_phone,
+    u.emergency_contact_2_relationship,
+    u.pan_number,
+    u.aadhar_number,
+    u.bank_account_number,
+    u.bank_ifsc_code,
+    u.bank_name,
+    u.profile_status,
+    u.profile_verified_by,
+    u.profile_verified_at,
+    u.profile_send_back_reason,
+    u.profile_send_back_by,
+    u.profile_send_back_at,
     u.created_at,
     u.updated_at,
     (SELECT i.invited_by FROM invitations i WHERE i.user_id = u.id ORDER BY i.created_at ASC LIMIT 1) AS invited_by
 `;
+
+// The self-service profile fields an employee may edit on their own
+// profile — never role_id/manager_id/status/email/employee_code/
+// profile_status, which stay HR/system managed via existing flows
+// (updateManager/updateStatus above, profileVerificationStateMachine.js).
+// Keyed by the camelCase name profileValidator.js's schema produces, mapped
+// to its snake_case column — the same camelCase-in/snake_case-SQL
+// convention insertUser above already uses.
+const PROFILE_FIELD_COLUMNS = {
+    designation: "designation",
+    department: "department",
+    phone: "phone",
+    dateOfBirth: "date_of_birth",
+    highestEducation: "highest_education",
+    passportNumber: "passport_number",
+    passportExpiryDate: "passport_expiry_date",
+    joiningDate: "joining_date",
+    lastWorkingDay: "last_working_day",
+    bloodGroup: "blood_group",
+    maritalStatus: "marital_status",
+    currentAddress: "current_address",
+    permanentAddress: "permanent_address",
+    nearestAirport: "nearest_airport",
+    healthProblem: "health_problem",
+    healthInsuranceStatus: "health_insurance_status",
+    emergencyContact1Phone: "emergency_contact_1_phone",
+    emergencyContact1Relationship: "emergency_contact_1_relationship",
+    emergencyContact2Phone: "emergency_contact_2_phone",
+    emergencyContact2Relationship: "emergency_contact_2_relationship",
+    panNumber: "pan_number",
+    aadharNumber: "aadhar_number",
+    bankAccountNumber: "bank_account_number",
+    bankIfscCode: "bank_ifsc_code",
+    bankName: "bank_name",
+};
 
 export async function findAllUsers() {
     const result = await pool.query(
@@ -62,6 +135,11 @@ export async function findUserById(id) {
     return result.rows[0] || null;
 }
 
+export async function findPasswordHashById(id) {
+    const result = await pool.query("SELECT password_hash FROM users WHERE id = $1", [id]);
+    return result.rows[0]?.password_hash ?? null;
+}
+
 export async function findAuthByEmail(email) {
     const result = await pool.query(
         `SELECT u.id, u.email, u.password_hash, u.status, r.role_name AS role, u.manager_id
@@ -87,6 +165,16 @@ export async function findAuthContextById(id) {
 export async function countUsers() {
     const result = await pool.query("SELECT COUNT(*)::int AS count FROM users");
     return result.rows[0].count;
+}
+
+// Used by authService.registerHrRoot's singleton guard — SUPER_ADMIN may
+// only ever be created once, so the bootstrap route checks this before
+// inserting a second one.
+export async function existsUserWithRole(roleId) {
+    const result = await pool.query("SELECT EXISTS (SELECT 1 FROM users WHERE role_id = $1) AS role_exists", [
+        roleId,
+    ]);
+    return result.rows[0].role_exists;
 }
 
 export async function insertUser({
@@ -148,6 +236,21 @@ export async function updateManager(id, managerId) {
     return result.rows[0] || null;
 }
 
+// `fields` is a plain object keyed by snake_case column name — only keys in
+// SELF_EDITABLE_PROFILE_COLUMNS are ever written, so a caller can never
+// smuggle role_id/manager_id/status/email through here even by mistake;
+// the zod schema in profileValidator.js is the primary defense, this is
+// belt-and-suspenders at the data-access layer.
+export async function updateProfileFields(id, fields) {
+    const keys = Object.keys(PROFILE_FIELD_COLUMNS).filter((key) => Object.prototype.hasOwnProperty.call(fields, key));
+    if (keys.length > 0) {
+        const setClause = keys.map((key, index) => `${PROFILE_FIELD_COLUMNS[key]} = $${index + 2}`).join(", ");
+        const values = keys.map((key) => fields[key]);
+        await pool.query(`UPDATE users SET ${setClause} WHERE id = $1`, [id, ...values]);
+    }
+    return findUserById(id);
+}
+
 export async function findDirectReports(managerId) {
     const result = await pool.query(
         `SELECT ${PUBLIC_USER_COLUMNS}
@@ -158,6 +261,18 @@ export async function findDirectReports(managerId) {
         [managerId]
     );
     return result.rows;
+}
+
+// A plain, non-recursive check — deliberately *not* isUserInSubtree below,
+// which is a transitive manager_id walk. Used to scope SUPER_ADMIN's HR-like
+// authority to only the HR_ADMINs reporting straight to them, never those
+// HR_ADMINs' own downstream teams (see authzScope.js).
+export async function isDirectReport(managerId, employeeId) {
+    const result = await pool.query(
+        "SELECT EXISTS (SELECT 1 FROM users WHERE id = $2 AND manager_id = $1) AS is_direct_report",
+        [managerId, employeeId]
+    );
+    return result.rows[0].is_direct_report;
 }
 
 export async function findSubtreeUsers(rootId) {
@@ -176,6 +291,88 @@ export async function findSubtreeUsers(rootId) {
         JOIN subtree s ON s.id = u.id
         ORDER BY u.first_name`,
         [rootId]
+    );
+    return result.rows;
+}
+
+// HR's verification queue, scoped to their own subtree (the service layer
+// passes `findSubtreeUsers`' ids in) — a plain WHERE ... IN, not another
+// recursive CTE, since the subtree is already resolved by the caller.
+export async function findEmployeesPendingVerification(employeeIds) {
+    if (employeeIds.length === 0) return [];
+    const result = await pool.query(
+        `SELECT ${PUBLIC_USER_COLUMNS}
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         WHERE u.id = ANY($1::uuid[]) AND u.profile_status = 'SUBMITTED'
+         ORDER BY u.first_name`,
+        [employeeIds]
+    );
+    return result.rows;
+}
+
+// The "Verified Employees" section on HR's verification page — same shape
+// and scoping as findEmployeesPendingVerification above, just the opposite
+// status.
+export async function findVerifiedEmployees(employeeIds) {
+    if (employeeIds.length === 0) return [];
+    const result = await pool.query(
+        `SELECT ${PUBLIC_USER_COLUMNS}
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         WHERE u.id = ANY($1::uuid[]) AND u.profile_status = 'VERIFIED'
+         ORDER BY u.first_name`,
+        [employeeIds]
+    );
+    return result.rows;
+}
+
+// A single UPDATE handles all three profile-status transitions (submit,
+// verify, send-back) — each caller only fills in the fields relevant to its
+// own transition, and everything else defaults to null, which is what
+// clears a stale value left over from an earlier transition (e.g.
+// submitting again after a send-back clears that send-back's reason, since
+// it's now addressed and no longer the current state).
+export async function updateProfileStatus(
+    id,
+    { status, verifiedBy = null, verifiedAt = null, sendBackReason = null, sendBackBy = null, sendBackAt = null }
+) {
+    const result = await pool.query(
+        `UPDATE users
+         SET profile_status = $2, profile_verified_by = $3, profile_verified_at = $4,
+             profile_send_back_reason = $5, profile_send_back_by = $6, profile_send_back_at = $7
+         WHERE id = $1
+         RETURNING id, profile_status, profile_send_back_reason`,
+        [id, status, verifiedBy, verifiedAt, sendBackReason, sendBackBy, sendBackAt]
+    );
+    return result.rows[0] || null;
+}
+
+// Walks *up* the reporting chain via manager_id — the reverse direction of
+// findSubtreeUsers/isUserInSubtree below — so a user can be shown who their
+// direct manager is and which HR admin will end up verifying their profile.
+// Ordered nearest-first (depth 1 = direct manager); the caller picks out the
+// first HR_ADMIN role in the list as "their HR", since that's the same
+// ancestor whose isUserInSubtree(theirId, employeeId) would return true.
+export async function findReportingLine(userId) {
+    const result = await pool.query(
+        `WITH RECURSIVE chain AS (
+            SELECT u.id, u.manager_id, u.first_name, u.last_name, u.email, r.role_name AS role, 0 AS depth
+            FROM users u
+            JOIN roles r ON r.id = u.role_id
+            WHERE u.id = $1
+            UNION ALL
+            SELECT u.id, u.manager_id, u.first_name, u.last_name, u.email, r.role_name AS role, c.depth + 1
+            FROM users u
+            JOIN roles r ON r.id = u.role_id
+            JOIN chain c ON u.id = c.manager_id
+            WHERE c.depth < 20
+        )
+        SELECT id, first_name, last_name, email, role
+        FROM chain
+        WHERE depth > 0
+        ORDER BY depth`,
+        [userId]
     );
     return result.rows;
 }
