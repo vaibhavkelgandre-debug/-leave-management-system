@@ -1,4 +1,6 @@
-CREATE TABLE users (
+-- IF NOT EXISTS: see 002_create_roles.sql — every migration has to be
+-- replay-safe, because the runner has no ledger and re-applies them all.
+CREATE TABLE IF NOT EXISTS users (
 
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
 

@@ -58,7 +58,9 @@ DB_NAME=leave_management_system_test npm run migrate
 $env:DB_NAME = "leave_management_system_test"; npm run migrate; Remove-Item Env:DB_NAME
 ```
 
-> ⚠️ **Known limitation**: the migration runner has no tracking table — it re-executes *every* migration file every time. On a database that already has migrations applied, re-running `npm run migrate` will fail with `relation "..." already exists`. If you only need to apply a couple of *new* migrations to an already-migrated database, apply just those files directly (e.g. via `psql -f server/src/sql/012_new_migration.sql`) instead of re-running the full script.
+> ℹ️ **The runner has no tracking table — it re-executes *every* migration file, every time.** That's safe: every file in `src/sql/` is written to be replay-safe (`IF NOT EXISTS`, `DROP … IF EXISTS` before an `ADD CONSTRAINT`, `ON CONFLICT DO NOTHING` on seeds, and an `information_schema` guard around the one `RENAME`), so running `npm run migrate` against an already-migrated database applies the new files and no-ops the rest.
+>
+> This used to fail with `relation "roles" already exists` at `002_create_roles.sql`, which aborted the whole run and left any *new* migration unapplied — the old advice was to apply new files by hand with `psql -f`. That's no longer necessary. **When you add a migration, keep it replay-safe** (see the rules in `.claude/rules.md`) and verify by running the suite twice against the `_test` database.
 
 ## 5. Run the server
 

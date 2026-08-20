@@ -1,0 +1,23 @@
+-- Backs HR's paginated browse view (GET /api/leave-requests, see
+-- leaveRequestRepository.findLeaveRequestsFiltered).
+--
+-- That query is always shaped `WHERE lr.employee_id = ANY($subtree) [AND …]
+-- ORDER BY lr.start_date DESC LIMIT/OFFSET`. The existing indexes on
+-- leave_requests are (employee_id) and (employee_id, status): both can find
+-- the caller's rows, but neither can return them already ordered, so Postgres
+-- sorts the entire matching set on every page before throwing away all but
+-- 25 rows. At NFR-7's target (200 employees, three years — thousands of rows
+-- per HR branch) that makes page 1 no cheaper than the unpaginated query it
+-- replaced, which would defeat the point of paginating at all.
+--
+-- (employee_id, start_date DESC) lets the same query walk the index in order
+-- and stop after one page. DESC is part of the index, not decoration: the
+-- ORDER BY is descending, and an ASC index can only be read backwards for a
+-- single key, not for the multi-key `= ANY(...)` case this query uses.
+--
+-- Deliberately not a covering index (no INCLUDE of the selected columns):
+-- the query joins users/roles/leave_types for names anyway, so the heap
+-- fetches happen regardless — an INCLUDE would just make the index larger
+-- than the table's own hot columns for no saved I/O.
+CREATE INDEX IF NOT EXISTS idx_leave_requests_employee_start_date
+    ON leave_requests (employee_id, start_date DESC);

@@ -7,7 +7,7 @@
 -- invite. `DELEGATION` is a new `entity_type`; the rest reuse the existing
 -- `PROFILE`/`SALARY_SLIP` entity types (a notification "about a user's own
 -- record" already meant `PROFILE`, regardless of which field changed).
-ALTER TABLE notifications DROP CONSTRAINT notifications_type_check;
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
 ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (type IN (
     'LEAVE_REQUEST_SUBMITTED',
     'LEAVE_REQUEST_DECIDED',
@@ -27,6 +27,6 @@ ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (type IN
     'INVITE_ACCEPTED'
 ));
 
-ALTER TABLE notifications DROP CONSTRAINT notifications_entity_type_check;
+ALTER TABLE notifications DROP CONSTRAINT IF EXISTS notifications_entity_type_check;
 ALTER TABLE notifications ADD CONSTRAINT notifications_entity_type_check
     CHECK (entity_type IN ('LEAVE_REQUEST', 'PROFILE', 'SALARY_SLIP', 'DELEGATION'));
