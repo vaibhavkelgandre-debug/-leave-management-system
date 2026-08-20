@@ -64,7 +64,10 @@ describe("MyBalancesPage", () => {
         renderWithProviders(<MyBalancesPage />);
         await screen.findByText("My requests");
 
-        const dot = await screen.findByTitle(/annual leave/i);
+        // Found by accessible name, not `title` — the calendar's hover label
+        // is the app's own tooltip now, so `aria-label` is what identifies an
+        // event (see HolidayCalendar.test.jsx's hover case).
+        const dot = await screen.findByLabelText(/annual leave/i);
         await userEvent.click(dot);
 
         // Scoped to "My requests" — the FullCalendar event itself also

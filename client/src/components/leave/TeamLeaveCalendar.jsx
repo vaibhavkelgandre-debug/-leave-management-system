@@ -11,6 +11,8 @@ import { useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import { eachDateKeyInRange, formatDateRange } from "../../utils/dates.js";
+import { useHoverTooltip } from "../../hooks/useHoverTooltip.js";
+import { FloatingTooltip } from "../ui/Tooltip.jsx";
 
 const HOLIDAY_COLOR = "#4f46e5";
 // Matches the app's existing StatusBadge palette (badges.js).
@@ -50,6 +52,7 @@ const FC_COMPACT_CLASSES = [
 export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, selectedRequestId, onSelectRequest }) {
     const calendarRef = useRef(null);
     const lastNotifiedYear = useRef(null);
+    const tooltip = useHoverTooltip();
 
     // Only SUBMITTED/APPROVED requests occupy a day — a
     // withdrawn/rejected/cancelled request never happened, so it would just
@@ -105,6 +108,10 @@ export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, sele
         }
     }
 
+    // Hovering an event shows the app's own tooltip, not the browser's native
+    // `title` box — see hooks/useHoverTooltip.js. `aria-label` still carries
+    // the same text, since the tooltip itself is `pointer-events-none`
+    // decoration and a screen reader needs the description on the event.
     function handleEventDidMount(info) {
         const { employeeName, rangeLabel, statusLabel } = info.event.extendedProps;
         // Holiday events have no employeeName/statusLabel — just their own
@@ -112,8 +119,9 @@ export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, sele
         const label = employeeName
             ? `${employeeName} — ${info.event.title.split(" · ")[1]} (${rangeLabel}) — ${statusLabel}`
             : `${info.event.title} (${rangeLabel})`;
-        info.el.title = label;
         info.el.setAttribute("aria-label", label);
+        info.el.addEventListener("mouseenter", () => tooltip.show(info.el, label));
+        info.el.addEventListener("mouseleave", tooltip.hide);
     }
 
     function handleEventClick(info) {
@@ -143,9 +151,11 @@ export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, sele
                 dayMaxEvents={3}
                 events={[...requestEvents, ...holidayEvents]}
                 eventDidMount={handleEventDidMount}
+                eventWillUnmount={tooltip.hide}
                 eventClick={handleEventClick}
                 datesSet={handleDatesSet}
             />
+            <FloatingTooltip label={tooltip.label} style={tooltip.style} />
 
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">

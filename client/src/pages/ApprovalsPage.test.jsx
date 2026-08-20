@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { screen, within } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { renderWithProviders, makeAuthValue } from "../tests/renderWithProviders.jsx";
 import { ApprovalsPage } from "./ApprovalsPage.jsx";
@@ -50,7 +50,12 @@ describe("ApprovalsPage", () => {
         expect(leaveRequestService.getAllLeaveRequests).not.toHaveBeenCalled();
     });
 
-    it("defaults HR to the My Team tab, actionable", async () => {
+    // HR gets no tabs any more: the company-wide list is SUPER_ADMIN's alone
+    // (direct request), and a team-scoped "all requests" would have returned
+    // exactly the same rows this one already does. HR keeps the override
+    // authority SUPER_ADMIN doesn't have, so the two roles' views differ in
+    // both directions.
+    it("shows HR one team-scoped, actionable list and no tabs at all", async () => {
         leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }),
@@ -59,15 +64,27 @@ describe("ApprovalsPage", () => {
         expect(await screen.findByText("Asha Employee")).toBeInTheDocument();
         expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalled();
         expect(leaveRequestService.getAllLeaveRequests).not.toHaveBeenCalled();
-        expect(screen.getByRole("tab", { name: /my team/i })).toHaveAttribute("aria-selected", "true");
+        expect(screen.queryByRole("tablist")).not.toBeInTheDocument();
         expect(screen.getByRole("button", { name: /^approve$/i })).toBeInTheDocument();
     });
 
-    it("switches to the company-wide, read-only All Requests tab when clicked", async () => {
+    it("defaults SUPER_ADMIN to the My Team tab", async () => {
+        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
+        renderWithProviders(<ApprovalsPage />, {
+            authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
+        });
+
+        expect(await screen.findByText("Asha Employee")).toBeInTheDocument();
+        expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalled();
+        expect(leaveRequestService.getAllLeaveRequests).not.toHaveBeenCalled();
+        expect(screen.getByRole("tab", { name: /my team/i })).toHaveAttribute("aria-selected", "true");
+    });
+
+    it("switches SUPER_ADMIN to the company-wide, read-only All Requests tab when clicked", async () => {
         leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest({ id: "team-req" })]);
         leaveRequestService.getAllLeaveRequests.mockResolvedValue([makeRequest({ id: "all-req" })]);
         renderWithProviders(<ApprovalsPage />, {
-            authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }),
+            authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
         await screen.findByText("Asha Employee");
 
@@ -75,28 +92,26 @@ describe("ApprovalsPage", () => {
 
         expect(await screen.findByRole("tab", { name: /all requests/i })).toHaveAttribute("aria-selected", "true");
         expect(leaveRequestService.getAllLeaveRequests).toHaveBeenCalled();
-        // Read-only: no action buttons for a SUBMITTED request on this tab,
-        // even though the same status would show Approve/Reject on My Team.
+        // Read-only: no action buttons for a SUBMITTED request on this tab.
         expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
         expect(screen.queryByRole("button", { name: /^reject$/i })).not.toBeInTheDocument();
         expect(screen.getByRole("button", { name: /^details$/i })).toBeInTheDocument();
     });
 
-    it("switching back to My Team re-fetches the scoped list and restores actions", async () => {
+    it("switching back to My Team re-fetches the scoped list", async () => {
         leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
         leaveRequestService.getAllLeaveRequests.mockResolvedValue([makeRequest()]);
         renderWithProviders(<ApprovalsPage />, {
-            authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }),
+            authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
         await screen.findByText("Asha Employee");
 
         await userEvent.click(screen.getByRole("tab", { name: /all requests/i }));
         await screen.findByRole("button", { name: /^details$/i });
-        expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
 
         await userEvent.click(screen.getByRole("tab", { name: /my team/i }));
 
-        expect(await screen.findByRole("button", { name: /^approve$/i })).toBeInTheDocument();
+        await screen.findByRole("tab", { name: /my team/i });
         expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalledTimes(2);
     });
 
@@ -120,7 +135,7 @@ describe("ApprovalsPage", () => {
         });
         await screen.findByText("Asha Employee");
 
-        const bar = await screen.findByTitle(/asha employee — annual leave/i);
+        const bar = await screen.findByLabelText(/asha employee — annual leave/i);
         await userEvent.click(bar);
 
         // Scoped to the list card — the calendar bar itself also renders
@@ -128,5 +143,39 @@ describe("ApprovalsPage", () => {
         const row = screen.getByRole("button", { name: /^details$/i }).closest("li");
         expect(within(row).getByText("Asha Employee")).toBeInTheDocument();
         expect(row).toHaveClass("ring-indigo-300");
+    });
+
+    // The leave bars were the last thing in the app using the browser's native
+    // `title` tooltip, which rendered as a dark OS box beside the app's own
+    // light tooltips on every icon button.
+    it("shows the app's own tooltip when hovering a leave bar on the team calendar", async () => {
+        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
+            makeRequest({ start_date: todayDateKey(), end_date: todayDateKey() }),
+        ]);
+        renderWithProviders(<ApprovalsPage />, {
+            authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
+        });
+        await screen.findByText("Asha Employee");
+        const bar = await screen.findByLabelText(/asha employee — annual leave/i);
+
+        // Scoped by text, not by role alone: this page's row action buttons
+        // each keep a (hidden, CSS-driven) tooltip mounted at all times, so
+        // `role="tooltip"` on its own matches several.
+        const leaveTooltip = () =>
+            screen.queryAllByRole("tooltip").find((node) => /asha employee — annual leave/i.test(node.textContent));
+
+        expect(bar).not.toHaveAttribute("title");
+        expect(leaveTooltip()).toBeUndefined();
+
+        await userEvent.hover(bar);
+
+        // Everything the old native tooltip said: who, which leave type, the
+        // range, and the decision status.
+        await waitFor(() => expect(leaveTooltip()).toBeDefined());
+        // The fixture request is SUBMITTED, so the status half reads "Pending".
+        expect(leaveTooltip()).toHaveTextContent(/pending/i);
+
+        await userEvent.unhover(bar);
+        expect(leaveTooltip()).toBeUndefined();
     });
 });

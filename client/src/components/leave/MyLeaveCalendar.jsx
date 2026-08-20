@@ -6,6 +6,8 @@ import { useEffect, useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import { eachDateKeyInRange, formatDateRange } from "../../utils/dates.js";
+import { useHoverTooltip } from "../../hooks/useHoverTooltip.js";
+import { FloatingTooltip } from "../ui/Tooltip.jsx";
 
 const HOLIDAY_COLOR = "#4f46e5";
 // Matches the app's existing StatusBadge palette (badges.js: APPROVED is
@@ -51,6 +53,7 @@ export function MyLeaveCalendar({ requests, holidays, onActiveYearChange, focusD
     // Avoids re-notifying the parent for every render of the same month —
     // `datesSet` fires on more than just year changes (any nav, resize, etc.).
     const lastNotifiedYear = useRef(null);
+    const tooltip = useHoverTooltip();
 
     // Jumps the calendar to a newly submitted request so it's visible right
     // away, instead of silently landing on a month the employee isn't
@@ -114,16 +117,21 @@ export function MyLeaveCalendar({ requests, holidays, onActiveYearChange, focusD
         }
     }
 
+    // Hovering an event shows the app's own tooltip, not the browser's native
+    // `title` box — see hooks/useHoverTooltip.js. `aria-label` still carries
+    // the same text, since the tooltip itself is `pointer-events-none`
+    // decoration and a screen reader needs the description on the event.
     function handleEventDidMount(info) {
-        // Native browser tooltip on hover — surfaces the full date range and,
-        // for a leave request, whether it's still pending.
+        // Surfaces the full date range and, for a leave request, whether it's
+        // still pending — a dot on its own says neither.
         const { title } = info.event;
         const { rangeLabel, statusLabel } = info.event.extendedProps;
         const rangePart = rangeLabel.includes("–") ? ` (${rangeLabel})` : "";
         const statusPart = statusLabel ? ` — ${statusLabel}` : "";
         const label = `${title}${rangePart}${statusPart}`;
-        info.el.title = label;
         info.el.setAttribute("aria-label", label);
+        info.el.addEventListener("mouseenter", () => tooltip.show(info.el, label));
+        info.el.addEventListener("mouseleave", tooltip.hide);
     }
 
     function handleEventClick(info) {
@@ -149,9 +157,11 @@ export function MyLeaveCalendar({ requests, holidays, onActiveYearChange, focusD
                 firstDay={1}
                 events={[...leaveEvents, ...holidayEvents]}
                 eventDidMount={handleEventDidMount}
+                eventWillUnmount={tooltip.hide}
                 eventClick={handleEventClick}
                 datesSet={handleDatesSet}
             />
+            <FloatingTooltip label={tooltip.label} style={tooltip.style} />
 
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">

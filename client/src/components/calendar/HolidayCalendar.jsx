@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import { eachDateKeyInRange, formatDateRange } from "../../utils/dates.js";
+import { useHoverTooltip } from "../../hooks/useHoverTooltip.js";
+import { FloatingTooltip } from "../ui/Tooltip.jsx";
 
 // Indigo to match the rest of the app's primary color, applied as FullCalendar
 // event colors rather than global CSS so it doesn't bleed into other pages.
@@ -46,6 +48,7 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate, selec
     // Avoids re-notifying the parent for every render of the same month —
     // `datesSet` fires on more than just year changes (any nav, resize, etc.).
     const lastNotifiedYear = useRef(null);
+    const tooltip = useHoverTooltip();
 
     // Jumps the calendar to a newly created holiday so it's visible right away,
     // instead of silently landing on a month the user isn't looking at.
@@ -90,6 +93,10 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate, selec
         }
     }
 
+    // Hovering an event shows the app's own tooltip, not the browser's native
+    // `title` box — see hooks/useHoverTooltip.js. `aria-label` still carries
+    // the same text, since the tooltip itself is `pointer-events-none`
+    // decoration and a screen reader needs the description on the event.
     function handleEventDidMount(info) {
         // Native browser tooltip on hover. For a multi-day holiday this also
         // surfaces the full range, since a single day cell's dot otherwise
@@ -97,8 +104,9 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate, selec
         const { title } = info.event;
         const { rangeLabel } = info.event.extendedProps;
         const label = rangeLabel.includes("–") ? `${title} (${rangeLabel})` : title;
-        info.el.title = label;
         info.el.setAttribute("aria-label", label);
+        info.el.addEventListener("mouseenter", () => tooltip.show(info.el, label));
+        info.el.addEventListener("mouseleave", tooltip.hide);
     }
 
     function handleEventClick(info) {
@@ -121,9 +129,11 @@ export function HolidayCalendar({ holidays, onActiveYearChange, focusDate, selec
                 firstDay={1}
                 events={events}
                 eventDidMount={handleEventDidMount}
+                eventWillUnmount={tooltip.hide}
                 eventClick={handleEventClick}
                 datesSet={handleDatesSet}
             />
+            <FloatingTooltip label={tooltip.label} style={tooltip.style} />
 
             <div className="mt-3 flex flex-wrap items-center justify-center gap-x-4 gap-y-1 border-t border-slate-100 pt-3 text-xs text-slate-500">
                 <span className="flex items-center gap-1.5">

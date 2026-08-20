@@ -6,6 +6,7 @@
 // anything else in the app.
 import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { computeTooltipStyle, TOOLTIP_MAX_WIDTH } from "../../utils/tooltipPosition.js";
 
 const POSITION_CLASSES = {
     top: "bottom-full left-1/2 mb-1.5 -translate-x-1/2",
@@ -14,33 +15,28 @@ const POSITION_CLASSES = {
     left: "right-full top-1/2 mr-1.5 -translate-y-1/2",
 };
 
-const PORTAL_MAX_WIDTH = 220;
-const PORTAL_GAP = 6;
-const VIEWPORT_MARGIN = 8;
+// The floating box itself, portalled to `document.body` — the *only* place
+// the portal tooltip's look is defined, shared by `Tooltip` below and by the
+// calendars (which hover a DOM element FullCalendar owns rather than a React
+// child, so they drive it through hooks/useHoverTooltip.js instead of
+// wrapping a trigger). Anything that renders a hover label must come through
+// here, or the app grows a second tooltip style.
+//
+// `style` is whatever `computeTooltipStyle` returned for the trigger's rect;
+// rendering nothing without it means a caller can pass its state straight in.
+export function FloatingTooltip({ label, style }) {
+    if (!label || !style) return null;
 
-// Where the tooltip box's own top-left corner should land in viewport
-// coordinates for each position, before edge-clamping — "top"/"bottom" give
-// a center point (clamped edge-to-edge below), "left"/"right" give a
-// vertically-centered edge (the box's height is small and unlikely to
-// overflow top/bottom, so only horizontal clamping matters there).
-function computePortalStyle(rect, position) {
-    if (position === "right") {
-        const left = Math.min(rect.right + PORTAL_GAP, window.innerWidth - PORTAL_MAX_WIDTH - VIEWPORT_MARGIN);
-        return { top: rect.top + rect.height / 2, left: Math.max(left, VIEWPORT_MARGIN), transform: "translateY(-50%)" };
-    }
-    if (position === "left") {
-        const left = Math.max(rect.left - PORTAL_GAP - PORTAL_MAX_WIDTH, VIEWPORT_MARGIN);
-        return { top: rect.top + rect.height / 2, left, transform: "translateY(-50%)" };
-    }
-    const half = PORTAL_MAX_WIDTH / 2;
-    const centerX = Math.min(
-        Math.max(rect.left + rect.width / 2, VIEWPORT_MARGIN + half),
-        window.innerWidth - VIEWPORT_MARGIN - half
+    return createPortal(
+        <span
+            role="tooltip"
+            style={{ position: "fixed", top: style.top, left: style.left, transform: style.transform, maxWidth: TOOLTIP_MAX_WIDTH }}
+            className="pointer-events-none z-[100] rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium break-words text-slate-700 shadow-md"
+        >
+            {label}
+        </span>,
+        document.body
     );
-    if (position === "bottom") {
-        return { top: rect.bottom + PORTAL_GAP, left: centerX, transform: "translateX(-50%)" };
-    }
-    return { top: rect.top - PORTAL_GAP, left: centerX, transform: "translateX(-50%) translateY(-100%)" };
 }
 
 // `portal`: renders the floating label into `document.body`, positioned from
@@ -77,7 +73,7 @@ export function Tooltip({ label, children, position = "top", className = "", por
 
     function showPortalTooltip() {
         if (!anchorRef.current) return;
-        setPortalStyle(computePortalStyle(anchorRef.current.getBoundingClientRect(), position));
+        setPortalStyle(computeTooltipStyle(anchorRef.current.getBoundingClientRect(), position));
     }
 
     function hidePortalTooltip() {
@@ -94,17 +90,7 @@ export function Tooltip({ label, children, position = "top", className = "", por
             onBlur={hidePortalTooltip}
         >
             {children}
-            {portalStyle &&
-                createPortal(
-                    <span
-                        role="tooltip"
-                        style={{ position: "fixed", top: portalStyle.top, left: portalStyle.left, transform: portalStyle.transform, maxWidth: PORTAL_MAX_WIDTH }}
-                        className="pointer-events-none z-[100] rounded-md border border-slate-200 bg-white px-2 py-1 text-xs font-medium break-words text-slate-700 shadow-md"
-                    >
-                        {label}
-                    </span>,
-                    document.body
-                )}
+            <FloatingTooltip label={label} style={portalStyle} />
         </span>
     );
 }
