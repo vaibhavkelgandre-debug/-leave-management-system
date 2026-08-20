@@ -5,7 +5,13 @@
 // *results* a real filter/aggregation query would produce, which is the
 // only way to actually prove that from the outside.
 import { describe, it, expect } from "vitest";
-import { createRootHr, createUser, createLeaveType, createLeaveRequest } from "./helpers/factories.js";
+import {
+    createRootHr,
+    createSuperAdmin,
+    createUser,
+    createLeaveType,
+    createLeaveRequest,
+} from "./helpers/factories.js";
 import { loginAs } from "./helpers/authHelpers.js";
 
 describe("GET /api/leave-requests (HR filterable browse)", () => {
@@ -118,6 +124,32 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const filteredByOthersEmployee = await hrAAgent.get("/api/leave-requests").query({ employeeId: employeeOfB.id });
         expect(filteredByOthersEmployee.body.data).toHaveLength(0);
     });
+
+    // SUPER_ADMIN is the exception to that scoping (direct request): its
+    // HR *write* scope is direct-report HR admins only, but for reporting it
+    // covers every employee — the role that can already read every request
+    // company-wide would otherwise get a browse view of almost nobody.
+    it("covers every branch for SUPER_ADMIN, including employees it has no HR-write scope over", async () => {
+        const superAdmin = await createSuperAdmin({ email: "browse-super@example.com" });
+        const hr = await createRootHr({ email: "browse-super-hr@example.com", managerId: null });
+        const deepEmployee = await createUser({ email: "browse-super-emp@example.com", managerId: hr.id });
+        const leaveType = await createLeaveType({ name: "Browse Super Leave" });
+        await createLeaveRequest({
+            employeeId: deepEmployee.id,
+            leaveTypeId: leaveType.id,
+            startDate: "2031-03-10",
+            endDate: "2031-03-11",
+        });
+
+        const superAgent = await loginAs(superAdmin);
+        const response = await superAgent.get("/api/leave-requests");
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body.data.map((row) => row.employee_id)).toContain(deepEmployee.id);
+
+        const filtered = await superAgent.get("/api/leave-requests").query({ employeeId: deepEmployee.id });
+        expect(filtered.body.data).toHaveLength(1);
+    });
 });
 
 describe("GET /api/leave-requests/report (leave taken per employee)", () => {
@@ -213,6 +245,32 @@ describe("GET /api/leave-requests/report (leave taken per employee)", () => {
         const response = await hrAAgent.get("/api/leave-requests/report").query({ startDate: "2031-12-01", endDate: "2031-12-31" });
 
         expect(response.body.data.find((r) => r.employee_id === employeeOfB.id)).toBeUndefined();
+    });
+
+    it("reports on every employee for SUPER_ADMIN, whatever branch they're in", async () => {
+        const superAdmin = await createSuperAdmin({ email: "report-super@example.com" });
+        const hr = await createRootHr({ email: "report-super-hr@example.com", managerId: null });
+        const deepEmployee = await createUser({ email: "report-super-emp@example.com", managerId: hr.id });
+        const leaveType = await createLeaveType({ name: "Report Super Leave" });
+        const hrAgent = await loginAs(hr);
+        const request = await createLeaveRequest({
+            employeeId: deepEmployee.id,
+            leaveTypeId: leaveType.id,
+            startDate: "2031-11-03",
+            endDate: "2031-11-04",
+        });
+        await hrAgent.post(`/api/leave-requests/${request.id}/approve`).send({});
+
+        const superAgent = await loginAs(superAdmin);
+        const response = await superAgent.get("/api/leave-requests/report").query({
+            startDate: "2031-11-01",
+            endDate: "2031-11-30",
+        });
+
+        expect(response.statusCode).toBe(200);
+        const row = response.body.data.find((r) => r.employee_id === deepEmployee.id);
+        expect(row).toBeDefined();
+        expect(Number(row.total_days_taken)).toBeGreaterThan(0);
     });
 });
 

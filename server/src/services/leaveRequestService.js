@@ -390,26 +390,37 @@ export async function listTeamLeaveRequests(actor) {
     return findLeaveRequestsForEmployees(employeeIds);
 }
 
-// Output: literally every leave request in the system — HR's company-wide
-// "All Requests" view for browsing/context (route-gated to HR_ADMIN only,
-// see leaveRequestRoutes.js — a plain role check is correct there, same
-// reasoning as the existing /team comment). This is deliberately broader
-// than what listTeamLeaveRequests' HR branch (and resolveActingCapacity)
-// actually let an HR admin *act* on — company-wide visibility for context
-// is still useful even though acting is scoped to one's own branch, the
-// same distinction NFR-5's viewing-vs-acting split already draws elsewhere.
+// Output: literally every leave request in the system — the company-wide
+// "All Requests" view for browsing/context, route-gated to **SUPER_ADMIN
+// only** (see leaveRequestRoutes.js). An HR_ADMIN is deliberately not
+// company-wide here any more: their view of leave is their own branch, which
+// listTeamLeaveRequests already gives them. Still broader than what
+// SUPER_ADMIN can *act* on (resolveActingCapacity — they can't override at
+// all), the same viewing-vs-acting split NFR-5 draws elsewhere.
 export async function listAllLeaveRequests() {
     return findAllLeaveRequests();
 }
 
-// Shared by both FR-024 functions below: this app's auth is strict per-team
-// (see resolveActingCapacity's note above), so HR's browse/report tools are
-// scoped to the acting HR admin's own reporting subtree, exactly like
-// listTeamLeaveRequests' HR branch — never every employee in the company,
-// even though listAllLeaveRequests's read-only "All Requests" view
-// deliberately is. Excludes the HR admin themself, same as
-// listTeamLeaveRequests.
-async function subtreeEmployeeIds(actor) {
+// Shared by both FR-024 functions below: which employees the caller's
+// browse/report tools may cover.
+//
+// For an HR_ADMIN this is their own reporting subtree, exactly like
+// listTeamLeaveRequests' HR branch — this app's auth is strict per-team (see
+// resolveActingCapacity's note above), never every employee in the company.
+// Excludes the HR admin themself, same as listTeamLeaveRequests.
+//
+// **SUPER_ADMIN gets `undefined` — no employee restriction at all** (direct
+// request). Reusing getHrScopedEmployeeIds for them would have limited the
+// reports to their direct-report HR admins, which is right for HR-scoped
+// *writes* (verifying a profile, running payroll) and useless for reporting:
+// the one role that can already read every request company-wide would get a
+// leave-taken report covering three people. Both repository functions treat
+// `undefined` employeeIds as "no filter" and an empty array as "nobody", so
+// this deliberately returns the former, never `[]`.
+async function reportableEmployeeIds(actor) {
+    if (actor.role === "SUPER_ADMIN") {
+        return undefined;
+    }
     return getHrScopedEmployeeIds(actor);
 }
 
@@ -422,11 +433,12 @@ async function subtreeEmployeeIds(actor) {
 // listAllLeaveRequests above does, since a withdrawn request is exactly the
 // kind of thing HR might filter *for* when browsing history, not dead
 // weight to hide as it is on the action-oriented approvals views. Scoped to
-// `actor`'s own reporting subtree (see subtreeEmployeeIds) — an `employeeId`
+// `actor`'s own reporting subtree, or company-wide for SUPER_ADMIN (see
+// reportableEmployeeIds) — an `employeeId`
 // filter for someone outside it simply returns no rows, the same as
 // filtering for an employeeId that doesn't exist at all.
 export async function listFilteredLeaveRequests(actor, filters) {
-    const employeeIds = await subtreeEmployeeIds(actor);
+    const employeeIds = await reportableEmployeeIds(actor);
     return findLeaveRequestsFiltered({ ...filters, employeeIds });
 }
 
@@ -438,17 +450,24 @@ export async function listFilteredLeaveRequests(actor, filters) {
 // period. Shared by the JSON endpoint (on-screen table) and the CSV
 // download (leaveRequestController.js) — this function only returns
 // structured data, CSV formatting is a presentation concern that lives in
-// the controller. Scoped to `actor`'s own reporting subtree, same as
-// listFilteredLeaveRequests above.
+// the controller. Scoped to `actor`'s own reporting subtree — or company-wide for
+// SUPER_ADMIN — same as listFilteredLeaveRequests above.
 export async function generateLeaveTakenReport(actor, { startDate, endDate }) {
-    const employeeIds = await subtreeEmployeeIds(actor);
+    const employeeIds = await reportableEmployeeIds(actor);
     return findLeaveTakenReport({ startDate, endDate, employeeIds });
 }
 
 // Input: the actor and a request id. Output: the request, if the actor is
-// its owner, HR, its direct manager, or an active delegate for that manager
-// — viewing is allowed in more cases than acting (an owner can view but
-// never approve their own request). Failure mode: 404 otherwise.
+// its owner, its direct manager, an active delegate for that manager,
+// SUPER_ADMIN, or an HR_ADMIN whose own reporting subtree contains the
+// employee — viewing is allowed in more cases than acting (an owner can view
+// but never approve their own request). Failure mode: 404 otherwise.
+//
+// The HR_ADMIN case is subtree-scoped rather than company-wide (narrowed on
+// direct request, along with GET /all): an HR admin's view of leave is their
+// own branch. SUPER_ADMIN stays company-wide precisely so it agrees with the
+// company-wide list they alone can now fetch — otherwise every row in that
+// list would 404 on the way to its own detail view.
 export async function getLeaveRequestById(actor, requestId) {
     const request = await findLeaveRequestById(requestId);
     if (!request) {
@@ -458,9 +477,9 @@ export async function getLeaveRequestById(actor, requestId) {
     const isOwner = actor.id === request.employee_id;
     if (
         isOwner ||
-        actor.role === "HR_ADMIN" ||
         actor.role === "SUPER_ADMIN" ||
-        (await isManagerOrDelegateOf(actor.id, request.employee_manager_id))
+        (await isManagerOrDelegateOf(actor.id, request.employee_manager_id)) ||
+        (actor.role === "HR_ADMIN" && (await isUserInSubtree(actor.id, request.employee_id)))
     ) {
         return request;
     }
