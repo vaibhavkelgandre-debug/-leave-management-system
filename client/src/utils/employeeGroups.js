@@ -46,3 +46,48 @@ export function groupEmployeesForOrgView(users) {
 
     return { leadership, teams, unassigned };
 }
+
+// Groups My Team's *extended* team (everyone below the viewer who doesn't
+// report straight to them) under whoever each person actually reports to, so
+// the page can render one small table per manager instead of a single flat
+// list with a "Reports To" column to scan.
+//
+// Deliberately not `groupEmployeesForOrgView` above: that one is a fixed
+// leadership/teams/unassigned shape keyed on *role* (only a MANAGER ever gets
+// a team), which is right for the company-wide org view and wrong here — in
+// a subtree the intermediate manager can just as easily be an HR_ADMIN, and
+// there's no leadership tier to separate out.
+//
+// `directory` is where managers are looked up (My Team's own list plus the
+// viewer): an extended-team member's manager is usually one of the viewer's
+// *direct* reports, so they're not in `people` themselves. Anyone whose
+// manager can't be resolved lands in `ungrouped` rather than being dropped —
+// same defensive choice groupEmployeesForOrgView makes for stale data.
+export function groupTeamByManager(people, directory) {
+    const byId = new Map(directory.map((person) => [person.id, person]));
+    const groups = new Map();
+    const ungrouped = [];
+
+    for (const person of people) {
+        const manager = person.manager_id ? byId.get(person.manager_id) : null;
+        if (!manager) {
+            ungrouped.push(person);
+            continue;
+        }
+        if (!groups.has(manager.id)) {
+            groups.set(manager.id, { manager, reports: [] });
+        }
+        groups.get(manager.id).reports.push(person);
+    }
+
+    const byFirstName = (a, b) => a.first_name.localeCompare(b.first_name);
+    for (const group of groups.values()) {
+        group.reports.sort(byFirstName);
+    }
+    ungrouped.sort(byFirstName);
+
+    return {
+        groups: [...groups.values()].sort((a, b) => byFirstName(a.manager, b.manager)),
+        ungrouped,
+    };
+}

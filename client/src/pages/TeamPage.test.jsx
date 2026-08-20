@@ -32,7 +32,47 @@ describe("TeamPage", () => {
 
         const extendedSection = screen.getByText("Extended team").closest("section");
         expect(within(extendedSection).getByText(/Rina/)).toBeInTheDocument();
-        expect(within(extendedSection).getByText(/Asha User/)).toBeInTheDocument();
+        // Asha appears in the extended section too — as the *heading* of the
+        // group of people who report to her, not as a table row.
+        expect(within(extendedSection).getByRole("heading", { name: /Asha User/ })).toBeInTheDocument();
+    });
+
+    // Replaces the old flat extended-team table with a "Reports To" column:
+    // one small table per manager, with the manager named above it, which
+    // frees that column's width for the fields people actually read.
+    it("groups the extended team under each manager, with no Reports To column", async () => {
+        const asha = makeUser({ id: "emp-1", first_name: "Asha", role: ROLES.MANAGER, manager_id: "mgr-1" });
+        const bala = makeUser({ id: "emp-2", first_name: "Bala", role: ROLES.MANAGER, manager_id: "mgr-1" });
+        const rina = makeUser({ id: "emp-3", first_name: "Rina", manager_id: "emp-1" });
+        const sam = makeUser({ id: "emp-4", first_name: "Sam", manager_id: "emp-2" });
+        userService.getMyTeam.mockResolvedValue([asha, bala, rina, sam]);
+
+        renderWithProviders(<TeamPage />, { authValue: managerAuthValue });
+
+        const extendedSection = (await screen.findByText("Extended team")).closest("section");
+        // One group per manager, each naming the manager and their headcount.
+        const ashaGroup = within(extendedSection).getByRole("heading", { name: /Asha User/ }).closest("section");
+        const balaGroup = within(extendedSection).getByRole("heading", { name: /Bala User/ }).closest("section");
+        expect(within(ashaGroup).getByText("Rina User")).toBeInTheDocument();
+        expect(within(ashaGroup).queryByText("Sam User")).not.toBeInTheDocument();
+        expect(within(balaGroup).getByText("Sam User")).toBeInTheDocument();
+        expect(within(ashaGroup).getByText("1 report")).toBeInTheDocument();
+
+        // The column those headings replace is gone from the grouped tables.
+        expect(within(ashaGroup).queryByRole("columnheader", { name: /reports to/i })).not.toBeInTheDocument();
+    });
+
+    // Only reachable with inconsistent data, but it must not silently drop
+    // people — and with no manager heading to carry it, the column comes back.
+    it("keeps an unresolvable-manager report visible, with the Reports To column", async () => {
+        const orphan = makeUser({ id: "emp-9", first_name: "Nina", manager_id: "someone-not-in-this-team" });
+        userService.getMyTeam.mockResolvedValue([orphan]);
+
+        renderWithProviders(<TeamPage />, { authValue: managerAuthValue });
+
+        const group = (await screen.findByText("Elsewhere in your reporting line")).closest("section");
+        expect(within(group).getByText("Nina User")).toBeInTheDocument();
+        expect(within(group).getByRole("columnheader", { name: /reports to/i })).toBeInTheDocument();
     });
 
     it("tags each report with their profile verification status, so HR can tell who's verified at a glance", async () => {
@@ -47,8 +87,8 @@ describe("TeamPage", () => {
 
         renderWithProviders(<TeamPage />, { authValue: managerAuthValue });
 
-        const ashaRow = (await screen.findByText("Asha User")).closest("li");
-        const kiranRow = (await screen.findByText("Kiran User")).closest("li");
+        const ashaRow = (await screen.findByText("Asha User")).closest("tr");
+        const kiranRow = (await screen.findByText("Kiran User")).closest("tr");
         expect(within(ashaRow).getByText("VERIFIED")).toBeInTheDocument();
         expect(within(kiranRow).getByText("INCOMPLETE")).toBeInTheDocument();
     });
@@ -67,34 +107,61 @@ describe("TeamPage", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load your team");
     });
 
-    it("lets a manager change a direct report's manager", async () => {
-        const employee = makeUser({ id: "emp-1", first_name: "Asha", manager_id: "mgr-1", invited_by: "mgr-1" });
+    // HR-tier viewer, because that's who these two endpoints are gated to
+    // server-side — see the MANAGER case below.
+    it("lets HR change a report's manager", async () => {
+        const employee = makeUser({ id: "emp-1", first_name: "Asha", manager_id: "hr-viewer", invited_by: "hr-viewer" });
         const otherManager = makeUser({ id: "mgr-2", first_name: "Rohit", role: ROLES.MANAGER });
         userService.getMyTeam.mockResolvedValue([employee, otherManager]);
         userService.updateManager.mockResolvedValue({ ...employee, manager_id: "mgr-2" });
 
-        renderWithProviders(<TeamPage />, { authValue: managerAuthValue });
-        const ashaRow = within((await screen.findByText("Asha User")).closest("li"));
+        renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
+        const ashaRow = within((await screen.findByText("Asha User")).closest("tr"));
 
         await userEvent.click(ashaRow.getByRole("button", { name: "Change manager" }));
         await userEvent.selectOptions(screen.getByLabelText(/manager for asha/i), "mgr-2");
-        await userEvent.click(ashaRow.getByRole("button", { name: "Save" }));
+        // Save/Cancel live in the edit row *below* the person's row now, not
+        // inside it — hence `screen`, not `ashaRow`.
+        await userEvent.click(screen.getByRole("button", { name: "Save" }));
 
         expect(userService.updateManager).toHaveBeenCalledWith("emp-1", "mgr-2");
     });
 
-    it("lets a manager deactivate a direct report they created, but not themselves", async () => {
+    // The form used to sit inside the Employee cell, where ManagerSelect's
+    // full-width <select> plus helper text stretched that column and visibly
+    // re-laid-out the whole table on open. A colSpan row can't do that.
+    it("opens the manager form in its own full-width row, not inside a column", async () => {
+        const employee = makeUser({ id: "emp-1", first_name: "Asha", manager_id: "hr-viewer", invited_by: "hr-viewer" });
+        const otherManager = makeUser({ id: "mgr-2", first_name: "Rohit", role: ROLES.MANAGER });
+        userService.getMyTeam.mockResolvedValue([employee, otherManager]);
+
+        renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
+        const personRow = (await screen.findByText("Asha User")).closest("tr");
+
+        await userEvent.click(within(personRow).getByRole("button", { name: "Change manager" }));
+
+        const select = screen.getByLabelText(/manager for asha/i);
+        // In a different row from the person's, and that row spans the table.
+        expect(personRow.contains(select)).toBe(false);
+        const editCell = select.closest("td");
+        expect(Number(editCell.getAttribute("colspan"))).toBeGreaterThan(1);
+
+        await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        expect(screen.queryByLabelText(/manager for asha/i)).not.toBeInTheDocument();
+    });
+
+    it("lets HR deactivate a report", async () => {
         const employee = makeUser({
             id: "emp-1",
             first_name: "Kiran",
             status: "ACTIVE",
-            manager_id: "mgr-1",
-            invited_by: "mgr-1",
+            manager_id: "hr-viewer",
+            invited_by: "hr-viewer",
         });
         userService.getMyTeam.mockResolvedValue([employee]);
         userService.updateStatus.mockResolvedValue({ ...employee, status: "INACTIVE" });
 
-        renderWithProviders(<TeamPage />, { authValue: managerAuthValue });
+        renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
         await screen.findByText("Kiran User");
 
         const deactivateButton = screen.getByRole("button", { name: /deactivate/i });
@@ -104,8 +171,32 @@ describe("TeamPage", () => {
         expect(userService.updateStatus).toHaveBeenCalledWith("emp-1", "INACTIVE");
     });
 
+    // All Employees (where "Add Employee" used to live) is SUPER_ADMIN-only
+    // now, so this is HR's only way into the invite form.
+    it("offers HR an Add Employee action, and never offers it to a plain MANAGER", async () => {
+        userService.getMyTeam.mockResolvedValue([]);
+
+        const { unmount } = renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
+        expect(await screen.findByRole("link", { name: /add employee/i })).toHaveAttribute(
+            "href",
+            "/dashboard/employees/new"
+        );
+        unmount();
+
+        renderWithProviders(<TeamPage />, {
+            authValue: makeAuthValue({ user: { id: "mgr-viewer", first_name: "Meera", role: ROLES.MANAGER } }),
+        });
+        expect(screen.queryByRole("link", { name: /add employee/i })).not.toBeInTheDocument();
+    });
+
     describe("HR reporting-line edit restriction", () => {
-        it("hides the edit control from an HR admin who didn't create this employee — auth is strict per-team, not company-wide", async () => {
+        // Widened on direct request: an HR admin manages everyone on their
+        // own team, not only the accounts they personally invited. Creator-only
+        // meant no controls at all for anyone HR inherited rather than created,
+        // which read as a missing feature. Everyone this page lists is inside
+        // the viewer's own subtree by construction, and the server re-checks
+        // that scope per request.
+        it("shows the edit control for someone on the viewer's team that a colleague created", async () => {
             const otherCreator = makeUser({ id: "hr-other", first_name: "Rahul", role: ROLES.HR_ADMIN });
             const employee = makeUser({
                 id: "emp-1",
@@ -116,9 +207,41 @@ describe("TeamPage", () => {
             userService.getMyTeam.mockResolvedValue([otherCreator, employee]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+            const zaraRow = within((await screen.findByText("Zara User")).closest("tr"));
 
-            expect(zaraRow.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+            expect(zaraRow.getByRole("button", { name: "Change manager" })).toBeInTheDocument();
+        });
+
+        // Both endpoints behind these controls are HR-tier server-side, so a
+        // MANAGER is offered neither — including on a row whose `invited_by`
+        // is the manager themself, a state only reachable synthetically (only
+        // HR can invite) but worth pinning: the client must not offer a
+        // control the server would 403.
+        it("offers a plain MANAGER neither control, even on an account attributed to them", async () => {
+            const inherited = makeUser({
+                id: "emp-1",
+                first_name: "Zara",
+                manager_id: "mgr-viewer",
+                invited_by: "hr-other",
+            });
+            const attributed = makeUser({
+                id: "emp-2",
+                first_name: "Yusuf",
+                manager_id: "mgr-viewer",
+                invited_by: "mgr-viewer",
+            });
+            userService.getMyTeam.mockResolvedValue([inherited, attributed]);
+
+            renderWithProviders(<TeamPage />, {
+                authValue: makeAuthValue({ user: { id: "mgr-viewer", first_name: "Meera", role: ROLES.MANAGER } }),
+            });
+            await screen.findByText("Zara User");
+
+            for (const name of ["Zara User", "Yusuf User"]) {
+                const row = within(screen.getByText(name).closest("tr"));
+                expect(row.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+                expect(row.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
+            }
         });
 
         it("lets the HR admin who created another HR admin change who they report to", async () => {
@@ -132,12 +255,16 @@ describe("TeamPage", () => {
             userService.getMyTeam.mockResolvedValue([createdHr]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const amitRow = within((await screen.findByText("Amit User")).closest("li"));
+            const amitRow = within((await screen.findByText("Amit User")).closest("tr"));
 
             expect(amitRow.getByRole("button", { name: "Change manager" })).toBeInTheDocument();
         });
 
-        it("hides the edit control from an HR admin who didn't create this HR admin", async () => {
+        // A downstream HR admin is on this viewer's team too, so the same
+        // widening applies — what still can't be reached is a *different*
+        // branch, which never appears on this page at all (getMyTeam only ever
+        // returns the viewer's own subtree).
+        it("shows the edit control for a downstream HR admin created by someone else", async () => {
             const otherCreator = makeUser({ id: "hr-other", first_name: "Rahul", role: ROLES.HR_ADMIN });
             const createdByOther = makeUser({
                 id: "hr-created",
@@ -149,19 +276,23 @@ describe("TeamPage", () => {
             userService.getMyTeam.mockResolvedValue([otherCreator, createdByOther]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const amitRow = within((await screen.findByText("Amit User")).closest("li"));
+            const amitRow = within((await screen.findByText("Amit User")).closest("tr"));
 
-            expect(amitRow.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+            expect(amitRow.getByRole("button", { name: "Change manager" })).toBeInTheDocument();
         });
 
-        it("hides the edit control for a root HR admin (no invited_by) from every HR admin, including themself", async () => {
-            const rootHr = makeUser({ id: "hr-root", first_name: "Amit", role: ROLES.HR_ADMIN });
-            userService.getMyTeam.mockResolvedValue([rootHr]);
+        // An account with no invitation record at all (registered directly, or
+        // predating the invitation table) used to be uneditable by anyone —
+        // now it's editable by the HR admin whose team it's on, which is the
+        // main case the widening exists for.
+        it("shows the edit control for an account with no recorded creator on the viewer's team", async () => {
+            const orphan = makeUser({ id: "hr-root", first_name: "Amit", role: ROLES.HR_ADMIN, manager_id: "hr-viewer" });
+            userService.getMyTeam.mockResolvedValue([orphan]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const amitRow = within((await screen.findByText("Amit User")).closest("li"));
+            const amitRow = within((await screen.findByText("Amit User")).closest("tr"));
 
-            expect(amitRow.queryByRole("button", { name: "Change manager" })).not.toBeInTheDocument();
+            expect(amitRow.getByRole("button", { name: "Change manager" })).toBeInTheDocument();
         });
     });
 
@@ -171,30 +302,30 @@ describe("TeamPage", () => {
             userService.getMyTeam.mockResolvedValue([employee]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+            const zaraRow = within((await screen.findByText("Zara User")).closest("tr"));
 
             expect(zaraRow.getByRole("button", { name: /deactivate/i })).toBeInTheDocument();
         });
 
-        it("hides the activate/deactivate control from an HR admin who didn't create this employee", async () => {
+        it("shows the activate/deactivate control for someone on the team a colleague created", async () => {
             const otherCreator = makeUser({ id: "hr-other", first_name: "Rahul", role: ROLES.HR_ADMIN });
             const employee = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-other", invited_by: "hr-other" });
             userService.getMyTeam.mockResolvedValue([otherCreator, employee]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+            const zaraRow = within((await screen.findByText("Zara User")).closest("tr"));
 
-            expect(zaraRow.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
+            expect(zaraRow.getByRole("button", { name: /deactivate/i })).toBeInTheDocument();
         });
 
-        it("hides the activate/deactivate control for an account with no recorded creator, for any HR admin other than themself", async () => {
+        it("shows the activate/deactivate control for an account with no recorded creator on the viewer's team", async () => {
             const orphan = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer" });
             userService.getMyTeam.mockResolvedValue([orphan]);
 
             renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
-            const zaraRow = within((await screen.findByText("Zara User")).closest("li"));
+            const zaraRow = within((await screen.findByText("Zara User")).closest("tr"));
 
-            expect(zaraRow.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
+            expect(zaraRow.getByRole("button", { name: /deactivate/i })).toBeInTheDocument();
         });
     });
 });

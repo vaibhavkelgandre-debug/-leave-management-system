@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { groupEmployeesForOrgView } from "./employeeGroups.js";
+import { groupEmployeesForOrgView, groupTeamByManager } from "./employeeGroups.js";
 
 function user(id, firstName, role, managerId = null) {
     return { id, first_name: firstName, role, manager_id: managerId };
@@ -65,5 +65,37 @@ describe("groupEmployeesForOrgView", () => {
         const users = [user("hr", "Priya", "HR_ADMIN"), user("mgr", "Amit", "MANAGER", "hr")];
         const { unassigned } = groupEmployeesForOrgView(users);
         expect(unassigned).toEqual([]);
+    });
+});
+
+describe("groupTeamByManager", () => {
+    // My Team's extended-team grouping: one entry per manager, so the page can
+    // render a table per manager instead of a flat list with a Reports To
+    // column. Managers are resolved from `directory`, not from `people` — an
+    // extended-team member's manager is usually one of the viewer's own direct
+    // reports, so they aren't in the list being grouped.
+    it("groups people under their own manager, sorted by manager then report", () => {
+        const mgrB = user("mgr-b", "Bala", "MANAGER", "hr-1");
+        const mgrA = user("mgr-a", "Asha", "MANAGER", "hr-1");
+        const zara = user("emp-1", "Zara", "EMPLOYEE", "mgr-a");
+        const nina = user("emp-2", "Nina", "EMPLOYEE", "mgr-a");
+        const sam = user("emp-3", "Sam", "EMPLOYEE", "mgr-b");
+
+        const { groups, ungrouped } = groupTeamByManager([zara, nina, sam], [mgrA, mgrB, zara, nina, sam]);
+
+        expect(groups.map((group) => group.manager.first_name)).toEqual(["Asha", "Bala"]);
+        expect(groups[0].reports.map((person) => person.first_name)).toEqual(["Nina", "Zara"]);
+        expect(groups[1].reports.map((person) => person.first_name)).toEqual(["Sam"]);
+        expect(ungrouped).toEqual([]);
+    });
+
+    it("collects anyone whose manager isn't in the directory rather than dropping them", () => {
+        const orphan = user("emp-1", "Zara", "EMPLOYEE", "someone-else");
+        const managerless = user("emp-2", "Nina", "EMPLOYEE", null);
+
+        const { groups, ungrouped } = groupTeamByManager([orphan, managerless], [orphan, managerless]);
+
+        expect(groups).toEqual([]);
+        expect(ungrouped.map((person) => person.first_name)).toEqual(["Nina", "Zara"]);
     });
 });
