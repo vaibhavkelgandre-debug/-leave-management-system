@@ -8,6 +8,7 @@ An HR platform for managing employee accounts, roles, leave types/balances, and 
 - **API reference** → [`docs/2.api_documentation.md`](docs/2.api_documentation.md)
 - **Database schema** → [`docs/3.db.md`](docs/3.db.md)
 - **Non-functional requirements** → [`docs/4.non_functional_requirements.md`](docs/4.non_functional_requirements.md)
+- **Role capability matrix (who can do what)** → [`docs/7.role_permissions_matrix.md`](docs/7.role_permissions_matrix.md)
 
 ## Quick start
 
