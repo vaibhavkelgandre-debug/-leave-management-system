@@ -11,12 +11,14 @@ import {
     insertLeaveRequest,
     findLeaveRequestById,
     findLeaveRequestsForEmployee,
-    findLeaveRequestsForEmployees,
-    findAllLeaveRequests,
+    findTeamLeaveRequests,
+    countTeamLeaveRequests,
     findLeaveRequestsFiltered,
     findLeaveTakenReport,
     findOverlappingLeaveRequest,
     updateLeaveRequestStatus,
+    countPendingDecisionsForManagers,
+    countLeaveRequestsFiltered,
 } from "../repositories/leaveRequestRepository.js";
 import { getBalanceForUserAndType, seedBalancesForUser } from "../repositories/leaveBalanceRepository.js";
 import { insertLedgerEntry } from "../repositories/leaveBalanceLedgerRepository.js";
@@ -376,29 +378,102 @@ export async function listMyLeaveRequests(employeeId) {
 // Not role-gated at the route level for this reason: the delegate can be a
 // plain EMPLOYEE with no direct reports of their own, who should still see
 // (and be able to act on) the delegated team's requests here.
-export async function listTeamLeaveRequests(actor) {
+// Output: `{ rows, total }` — one page of the caller's team requests, or (when
+// `startDate`/`endDate` are given instead of `limit`) everything overlapping
+// that window, which is what the approvals calendar needs: a month at a time,
+// not page 1. `total` is the count for the same filters either way.
+//
+// Paginated because this was the app's largest unbounded payload: for an
+// HR_ADMIN it's every request in their whole branch, all statuses but
+// WITHDRAWN, all years — thousands of rows and several megabytes at NFR-7's
+// target, fetched every time the Approvals page opened.
+export async function listTeamLeaveRequests(actor, { startDate, endDate, limit, offset } = {}) {
+    const employeeIds = await teamScopedEmployeeIds(actor);
+    const filters = { employeeIds, startDate, endDate, limit, offset };
+    const [rows, total] = await Promise.all([
+        findTeamLeaveRequests(filters),
+        countTeamLeaveRequests(filters),
+    ]);
+    return { rows, total };
+}
+
+// The employee ids behind the /team list, pulled out of it so anything else
+// answering "…about my team" resolves the same scope rather than
+// reimplementing it — currently listTeamLeaveRequests above and
+// listOnLeaveToday below. Two copies of this drifting apart would mean a
+// dashboard tile and an approvals list disagreeing about who's on the team.
+async function teamScopedEmployeeIds(actor) {
     if (actor.role === "HR_ADMIN" || actor.role === "SUPER_ADMIN") {
-        const employeeIds = await getHrScopedEmployeeIds(actor);
-        return findLeaveRequestsForEmployees(employeeIds);
+        return getHrScopedEmployeeIds(actor);
     }
 
     const reports = await findDirectReports(actor.id);
     const delegatedManagerIds = await findActiveDelegatedManagerIds(actor.id, todayDateKey());
     const delegatedReports = await Promise.all(delegatedManagerIds.map((managerId) => findDirectReports(managerId)));
 
-    const employeeIds = [...reports, ...delegatedReports.flat()].map((report) => report.id);
-    return findLeaveRequestsForEmployees(employeeIds);
+    return [...reports, ...delegatedReports.flat()].map((report) => report.id);
 }
 
-// Output: literally every leave request in the system — the company-wide
-// "All Requests" view for browsing/context, route-gated to **SUPER_ADMIN
-// only** (see leaveRequestRoutes.js). An HR_ADMIN is deliberately not
-// company-wide here any more: their view of leave is their own branch, which
-// listTeamLeaveRequests already gives them. Still broader than what
+// Output: `{ count }` — how many requests are waiting on *this* caller's
+// decision right now. Deliberately a count endpoint rather than a list the
+// caller counts itself: the sidebar badge asks for this on every page load,
+// and the team list behind it is thousands of rows at NFR-7 scale (see
+// countPendingDecisionsForManagers).
+//
+// The rule matches what the caller could actually decide today
+// (resolveActingCapacity): the employee's assigned manager is either the
+// caller, or a manager the caller is currently an active delegate for.
+//
+// This is narrower than "every SUBMITTED row in my team list" for an HR-tier
+// caller, and that's intentional — their list spans their whole branch for
+// visibility, but most of it is still the actual manager's call to make
+// first, so counting all of it would badge HR with work that isn't theirs.
+// It is exactly the rule the client used to apply after downloading the
+// rows (canDecideDirectly in leaveRequestAuthz.js), moved server-side.
+//
+// One known gap, preserved rather than fixed here: an HR-tier caller who is
+// *also* someone's active delegate doesn't get those delegated rows counted,
+// because listTeamLeaveRequests' HR branch doesn't list them either. Making
+// the count include them would badge rows the Approvals page won't show.
+export async function countPendingDecisions(actor) {
+    const isHrTier = actor.role === "HR_ADMIN" || actor.role === "SUPER_ADMIN";
+    const delegatedManagerIds = isHrTier ? [] : await findActiveDelegatedManagerIds(actor.id, todayDateKey());
+    return countPendingDecisionsForManagers([actor.id, ...delegatedManagerIds]);
+}
+
+// Output: the APPROVED requests overlapping today, for whoever the caller can
+// see — the dashboard's "on leave today" table, which used to be derived
+// client-side from the entire team (or company) request history.
+//
+// SUPER_ADMIN reads company-wide (`undefined` employee ids, no restriction),
+// matching the company-wide list it alone may fetch and the whole-company
+// headcount it already sees; everyone else gets their team scope. Reuses
+// findLeaveRequestsFiltered rather than a new query: "APPROVED, overlapping
+// [today, today]" is exactly one of its existing filter combinations.
+export async function listOnLeaveToday(actor) {
+    const today = todayDateKey();
+    const employeeIds = actor.role === "SUPER_ADMIN" ? undefined : await teamScopedEmployeeIds(actor);
+    return findLeaveRequestsFiltered({ status: "APPROVED", startDate: today, endDate: today, employeeIds });
+}
+
+// Output: `{ rows, total }` for the company-wide "All Requests" view, in the
+// same two bounded shapes as listTeamLeaveRequests above — a page, or a
+// window for the calendar. Route-gated to **SUPER_ADMIN only** (see
+// leaveRequestRoutes.js): an HR_ADMIN is deliberately not company-wide here,
+// their view of leave is their own branch. Still broader than what
 // SUPER_ADMIN can *act* on (resolveActingCapacity — they can't override at
 // all), the same viewing-vs-acting split NFR-5 draws elsewhere.
-export async function listAllLeaveRequests() {
-    return findAllLeaveRequests();
+//
+// `employeeIds` is omitted entirely rather than passed as a list of every
+// employee: undefined means "no restriction" in the repository, which keeps
+// this a single query instead of one that ships 200 uuids as a parameter.
+export async function listAllLeaveRequests({ startDate, endDate, limit, offset } = {}) {
+    const filters = { startDate, endDate, limit, offset };
+    const [rows, total] = await Promise.all([
+        findTeamLeaveRequests(filters),
+        countTeamLeaveRequests(filters),
+    ]);
+    return { rows, total };
 }
 
 // Shared by both FR-024 functions below: which employees the caller's
@@ -437,9 +512,22 @@ async function reportableEmployeeIds(actor) {
 // reportableEmployeeIds) — an `employeeId`
 // filter for someone outside it simply returns no rows, the same as
 // filtering for an employeeId that doesn't exist at all.
+// Output: `{ rows, total }` — one page of results plus the total row count
+// for the same filters, so the caller can render "showing 1–25 of N" and know
+// whether there's a next page. Paginated because the unfiltered default case
+// is every request in the caller's scope: thousands of rows and megabytes of
+// JSON at NFR-7's "200 employees, three years" target, and HR's browse tab
+// loads with no filters applied at all. Same `{ rows, total }` contract as
+// the notifications list, the app's other paginated endpoint.
 export async function listFilteredLeaveRequests(actor, filters) {
     const employeeIds = await reportableEmployeeIds(actor);
-    return findLeaveRequestsFiltered({ ...filters, employeeIds });
+    const scoped = { ...filters, employeeIds };
+    // Both queries take the same filters; only the list takes limit/offset.
+    const [rows, total] = await Promise.all([
+        findLeaveRequestsFiltered(scoped),
+        countLeaveRequestsFiltered(scoped),
+    ]);
+    return { rows, total };
 }
 
 // FR-024: "a report of leave taken per employee over a period" — one row

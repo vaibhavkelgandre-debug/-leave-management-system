@@ -36,6 +36,28 @@ export async function getMyTeam(req, res, next) {
 }
 
 // Fetches a single user's profile by id, e.g. for HR/manager detail views.
+// Picker-sized user list — see userService.listUserOptionsFor.
+export async function getUserOptions(req, res, next) {
+    try {
+        const options = await userService.listUserOptionsFor(req.user);
+        sendSuccess(res, 200, "User options retrieved", options);
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Count-only sibling of getMyTeam above: the dashboard's headcount chip reads
+// a single number, and getMyTeam returns every subtree row with all ~40
+// public columns to produce it.
+export async function getMyTeamSize(req, res, next) {
+    try {
+        const count = await reportingService.getTeamSize(req.user.id);
+        sendSuccess(res, 200, "Team size retrieved", { count });
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function getUserById(req, res, next) {
     try {
         const user = await userService.getUserById(req.params.id, req.user);

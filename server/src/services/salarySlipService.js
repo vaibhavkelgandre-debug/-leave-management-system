@@ -12,6 +12,7 @@ import { findStructureByEmployeeId } from "../repositories/salaryStructureReposi
 import { findLopWorkingDays, findTotalLeaveWorkingDays } from "../repositories/leaveRequestRepository.js";
 import {
     findSlipsByEmployeeIds,
+    countSlipsByEmployeeIds,
     findSlipById,
     replaceSlipsForPeriod,
     voidSlip,
@@ -21,6 +22,12 @@ import { renderPayslipPdfBuffer } from "./payslipPdfService.js";
 import { sendSalarySlipEmail } from "./mailService.js";
 import { formatPayPeriod } from "../utils/payPeriod.js";
 import { badRequest, forbidden, notFound, conflict } from "../utils/appError.js";
+
+// Both the preview (calculateForSubtree) and the confirm-time backstop
+// report this, so it lives in one place — two wordings for one condition is
+// how a UI ends up looking like it's describing two different problems.
+const ALREADY_GENERATED_REASON =
+    "Already received a payslip for this period — void the existing slip first to re-run";
 
 function round2(value) {
     return Math.round(value * 100) / 100;
@@ -127,11 +134,27 @@ async function computeSlip(employee, structure, payPeriod) {
             preJoiningDeduction
     );
 
+    // Nothing payable means nothing to issue. This happens for real — an
+    // employee on unpaid leave for the whole month, or one whose configured
+    // deductions (PF + ESIC + income tax) meet or exceed their earnings —
+    // and a zero-value payslip is worse than no payslip: it looks to the
+    // employee like a payment of ₹0 was made, and it occupies the
+    // (employee, pay_period) slot, so the corrected run later has to be
+    // voided first. Reported as a skip with the figures still attached, so
+    // HR can see *why* it came to zero (the LOP days and net pay columns are
+    // right there) instead of just being told it was skipped.
+    //
+    // `<= 0` rather than `=== 0`: a negative net pay is the same "don't
+    // issue this" case, and rounding means an exact 0 isn't guaranteed.
+    const isNothingPayable = netPay <= 0;
+
     return {
         employeeId: employee.id,
         employeeName: `${employee.first_name} ${employee.last_name}`,
-        status: "ok",
-        skipReason: null,
+        status: isNothingPayable ? "skipped" : "ok",
+        skipReason: isNothingPayable
+            ? "Net pay works out to zero or less — check the salary structure and this period's unpaid leave"
+            : null,
         computed: {
             basicPay: basicSalary,
             hra,
@@ -169,6 +192,20 @@ async function calculateForSubtree(actor, payPeriod, { role, profileStatus } = {
         employees = employees.filter((person) => person.profile_status === profileStatus);
     }
 
+    // Who already holds a live slip for this period. Resolved up front, in
+    // one query for the whole batch, so the *preview* can say "already
+    // received" — this used to be discovered only at confirm time, which
+    // meant HR read "Ready" for someone who was then silently skipped on
+    // approve. A VOIDED slip deliberately doesn't count: voiding is how a
+    // period is reopened for a corrected run (see confirmPayroll).
+    const existingSlips = await findSlipsByEmployeeIds(
+        employees.map((person) => person.id),
+        { payPeriod }
+    );
+    const alreadyGenerated = new Set(
+        existingSlips.filter((slip) => slip.status === "ACTIVE").map((slip) => slip.employee_id)
+    );
+
     const rows = await Promise.all(
         employees.map(async (employee) => {
             if (employee.profile_status !== "VERIFIED") {
@@ -195,6 +232,22 @@ async function calculateForSubtree(actor, payPeriod, { role, profileStatus } = {
                 };
             }
 
+            // Checked before the structure lookup and the computation:
+            // someone who already has a slip for this period needs neither,
+            // and re-deriving figures that can't be committed anyway would
+            // only invite the question of why they differ from the slip
+            // they'll actually keep. `computed: null` for the same reason —
+            // the row's numbers would not be the numbers on their payslip.
+            if (alreadyGenerated.has(employee.id)) {
+                return {
+                    employeeId: employee.id,
+                    employeeName: `${employee.first_name} ${employee.last_name}`,
+                    status: "already_generated",
+                    skipReason: ALREADY_GENERATED_REASON,
+                    computed: null,
+                };
+            }
+
             const structure = await findStructureByEmployeeId(employee.id);
             if (!structure) {
                 return {
@@ -210,10 +263,15 @@ async function calculateForSubtree(actor, payPeriod, { role, profileStatus } = {
         })
     );
 
+    // `alreadyGenerated` is counted separately from `skipped` rather than
+    // folded into it: "nothing to do here, by design" and "this one needs
+    // attention" are different messages for HR, and the client badges them
+    // differently. `ok + skipped + alreadyGenerated === total` always.
     const summary = {
         total: rows.length,
         ok: rows.filter((row) => row.status === "ok").length,
         skipped: rows.filter((row) => row.status === "skipped").length,
+        alreadyGenerated: rows.filter((row) => row.status === "already_generated").length,
     };
 
     return { rows, summary };
@@ -239,7 +297,11 @@ export async function confirmPayroll(actor, payPeriod, filters = {}) {
 
     const { rows } = await calculateForSubtree(actor, payPeriod, filters);
     let okRows = rows.filter((row) => row.status === "ok");
-    const skipped = rows.filter((row) => row.status === "skipped");
+    // Everything that isn't committable is reported back, whatever its
+    // reason — `!== "ok"` rather than `=== "skipped"`, so the
+    // already-received and nothing-payable rows can't silently vanish from
+    // the response the way they would under an exact-match filter.
+    const skipped = rows.filter((row) => row.status !== "ok");
 
     // Re-running an already-ACTIVE period must go through voidSalarySlip
     // first — confirming again silently (replaceSlipsForPeriod's own
@@ -248,6 +310,12 @@ export async function confirmPayroll(actor, payPeriod, filters = {}) {
     // A period whose only existing slip is VOIDED is untouched here: that
     // employee's row stays in okRows and replaceSlipsForPeriod both
     // archives the voided figures and reactivates it, exactly as before.
+    //
+    // calculateForSubtree now tags those rows `already_generated` itself, so
+    // in practice they never reach okRows and this block finds nothing. It
+    // stays as the narrow-race backstop it always implicitly was: two HR
+    // admins confirming the same period concurrently both compute their rows
+    // before either commits, and this is the later of the two checks.
     if (okRows.length > 0) {
         const existing = await findSlipsByEmployeeIds(
             okRows.map((row) => row.employeeId),
@@ -263,7 +331,7 @@ export async function confirmPayroll(actor, payPeriod, filters = {}) {
                         employeeId: row.employeeId,
                         employeeName: row.employeeName,
                         status: "skipped",
-                        skipReason: "Already generated for this period — void the existing slip first",
+                        skipReason: ALREADY_GENERATED_REASON,
                         computed: null,
                     });
                 }
@@ -367,7 +435,7 @@ export async function listMySalarySlips(actor, { payPeriod } = {}) {
 // (optional) narrows the scope by role before the `employeeId` filter (if
 // any) is applied on top — same "pre-filter, don't compute-then-discard"
 // shape as calculateForSubtree's own role/profileStatus filters.
-export async function listSalarySlipsForHr(actor, { employeeId, payPeriod, role } = {}) {
+export async function listSalarySlipsForHr(actor, { employeeId, payPeriod, role, limit, offset } = {}) {
     if (actor.role !== "HR_ADMIN" && actor.role !== "SUPER_ADMIN") {
         throw forbidden("Only HR can view team salary slips");
     }
@@ -377,7 +445,15 @@ export async function listSalarySlipsForHr(actor, { employeeId, payPeriod, role 
     }
     const scopedIds = scopedUsers.map((person) => person.id);
     const employeeIds = employeeId ? scopedIds.filter((id) => id === employeeId) : scopedIds;
-    return findSlipsByEmployeeIds(employeeIds, { payPeriod });
+    // Paginated: one payroll month is 200 rows and this list spans every
+    // month ever run. `{ rows, total }`, the same contract as the leave-request
+    // lists. The other callers of findSlipsByEmployeeIds pass no page and are
+    // unaffected.
+    const [rows, total] = await Promise.all([
+        findSlipsByEmployeeIds(employeeIds, { payPeriod, limit, offset }),
+        countSlipsByEmployeeIds(employeeIds, { payPeriod }),
+    ]);
+    return { rows, total };
 }
 
 // Input: the actor and a slip id. Output: the slip, if `actor` is the

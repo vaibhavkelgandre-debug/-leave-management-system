@@ -33,6 +33,11 @@ export const listSalarySlipsQuerySchema = z.object({
     employeeId: z.string().uuid("employeeId must be a valid id").optional(),
     payPeriod: payPeriodSchema.optional(),
     role: z.enum(["EMPLOYEE", "MANAGER", "HR_ADMIN"]).optional(),
+    // Pagination, same shape/cap as the leave-request lists: coerced (query
+    // strings are always strings), defaulted so an un-paged caller still gets
+    // a bounded response, capped so nobody can ask for every slip ever run.
+    limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+    offset: z.coerce.number().int().min(0).optional().default(0),
 });
 
 // GET /api/salary-slips/mine query params — the caller's own slips,

@@ -39,6 +39,14 @@ export const documentIdParamSchema = z.object({
     documentId: z.string().uuid("documentId must be a valid id"),
 });
 
+// Which Content-Disposition the document stream should carry. Constrained to
+// the two real values rather than interpolated from the query string, so the
+// header can never be shaped by the caller. Optional: the endpoint defaults
+// to `inline`, since previewing is what it exists for.
+export const documentDispositionQuerySchema = z.object({
+    disposition: z.enum(["inline", "attachment"]).optional(),
+});
+
 // HR-entered salary structure — all figures required (default to 0 rather
 // than omitting, since a structure is meant to be the complete picture used
 // for payroll, not a partial update like the self-service profile fields).

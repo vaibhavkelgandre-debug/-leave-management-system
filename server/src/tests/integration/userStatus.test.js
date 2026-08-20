@@ -45,11 +45,31 @@ describe("PATCH /api/users/:id/status", () => {
         expect(response.statusCode).toBe(403);
     });
 
-    it("rejects any HR admin from changing the status of an account with no recorded creator", async () => {
+    // Widened on direct request: an HR admin manages everyone in their own
+    // reporting subtree, not only the accounts they personally created. An
+    // account with no invitation record at all (registered directly, or
+    // predating the invitations table) used to be untouchable by anyone —
+    // which showed up as an employee with no controls at all on My Team.
+    it("lets an HR admin change the status of an account with no recorded creator inside their own subtree", async () => {
         const hr = await createRootHr({ email: "hr-status-noone@example.com" });
         // No `invitedBy` — mirrors a root account or any pre-existing row
         // with no invitation record at all.
         const employee = await createUser({ email: "status-orphan@example.com", managerId: hr.id });
+        const hrAgent = await loginAs(hr);
+
+        const response = await hrAgent.patch(`/api/users/${employee.id}/status`).send({ status: "INACTIVE" });
+
+        expect(response.statusCode).toBe(200);
+        expect(response.body.data.status).toBe("INACTIVE");
+    });
+
+    // The boundary that still holds, and the reason the widening is a subtree
+    // check rather than a plain role check: a different branch's people are
+    // still out of reach, whether or not they have a recorded creator.
+    it("rejects an HR admin changing the status of an account with no creator outside their subtree", async () => {
+        const hr = await createRootHr({ email: "hr-status-otherbranch@example.com" });
+        const otherHr = await createRootHr({ email: "hr-status-otherbranch-2@example.com" });
+        const employee = await createUser({ email: "status-orphan-elsewhere@example.com", managerId: otherHr.id });
         const hrAgent = await loginAs(hr);
 
         const response = await hrAgent.patch(`/api/users/${employee.id}/status`).send({ status: "INACTIVE" });

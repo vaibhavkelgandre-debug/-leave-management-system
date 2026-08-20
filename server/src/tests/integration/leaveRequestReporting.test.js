@@ -35,8 +35,8 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const response = await hrAgent.get("/api/leave-requests").query({ employeeId: employeeA.id });
 
         expect(response.statusCode).toBe(200);
-        expect(response.body.data).toHaveLength(1);
-        expect(response.body.data[0].employee_id).toBe(employeeA.id);
+        expect(response.body.data.requests).toHaveLength(1);
+        expect(response.body.data.requests[0].employee_id).toBe(employeeA.id);
     });
 
     it("filters by leaveTypeId", async () => {
@@ -50,8 +50,8 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const hrAgent = await loginAs(hr);
         const response = await hrAgent.get("/api/leave-requests").query({ leaveTypeId: typeA.id });
 
-        expect(response.body.data).toHaveLength(1);
-        expect(response.body.data[0].leave_type_id).toBe(typeA.id);
+        expect(response.body.data.requests).toHaveLength(1);
+        expect(response.body.data.requests[0].leave_type_id).toBe(typeA.id);
     });
 
     it("filters by status, including WITHDRAWN — unlike /all, nothing is excluded by default", async () => {
@@ -72,11 +72,11 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const hrAgent = await loginAs(hr);
 
         const unfilteredResponse = await hrAgent.get("/api/leave-requests");
-        expect(unfilteredResponse.body.data).toHaveLength(2);
+        expect(unfilteredResponse.body.data.requests).toHaveLength(2);
 
         const withdrawnResponse = await hrAgent.get("/api/leave-requests").query({ status: "WITHDRAWN" });
-        expect(withdrawnResponse.body.data).toHaveLength(1);
-        expect(withdrawnResponse.body.data[0].id).toBe(withdrawn.id);
+        expect(withdrawnResponse.body.data.requests).toHaveLength(1);
+        expect(withdrawnResponse.body.data.requests[0].id).toBe(withdrawn.id);
     });
 
     it("filters by a date range using overlap, not exact containment", async () => {
@@ -97,8 +97,8 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const hrAgent = await loginAs(hr);
         const response = await hrAgent.get("/api/leave-requests").query({ startDate: "2031-06-01", endDate: "2031-06-30" });
 
-        expect(response.body.data).toHaveLength(1);
-        expect(response.body.data[0].id).toBe(spanning.id);
+        expect(response.body.data.requests).toHaveLength(1);
+        expect(response.body.data.requests[0].id).toBe(spanning.id);
     });
 
     it("rejects an endDate before startDate", async () => {
@@ -119,10 +119,10 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const hrAAgent = await loginAs(hrA);
 
         const unfiltered = await hrAAgent.get("/api/leave-requests");
-        expect(unfiltered.body.data).toHaveLength(0);
+        expect(unfiltered.body.data.requests).toHaveLength(0);
 
         const filteredByOthersEmployee = await hrAAgent.get("/api/leave-requests").query({ employeeId: employeeOfB.id });
-        expect(filteredByOthersEmployee.body.data).toHaveLength(0);
+        expect(filteredByOthersEmployee.body.data.requests).toHaveLength(0);
     });
 
     // SUPER_ADMIN is the exception to that scoping (direct request): its
@@ -145,10 +145,84 @@ describe("GET /api/leave-requests (HR filterable browse)", () => {
         const response = await superAgent.get("/api/leave-requests");
 
         expect(response.statusCode).toBe(200);
-        expect(response.body.data.map((row) => row.employee_id)).toContain(deepEmployee.id);
+        expect(response.body.data.requests.map((row) => row.employee_id)).toContain(deepEmployee.id);
 
         const filtered = await superAgent.get("/api/leave-requests").query({ employeeId: deepEmployee.id });
-        expect(filtered.body.data).toHaveLength(1);
+        expect(filtered.body.data.requests).toHaveLength(1);
+    });
+
+    // The browse view is paginated (the unfiltered default is every request in
+    // the caller's scope — thousands of rows at NFR-7's target), with the same
+    // `{ rows, total }` contract as the notifications list.
+    it("returns one page plus the total for the same filters, and honours offset", async () => {
+        const hr = await createRootHr({ email: "browse-page-hr@example.com" });
+        const employee = await createUser({ email: "browse-page-emp@example.com", managerId: hr.id });
+        const leaveType = await createLeaveType({ name: "Browse Page Leave" });
+        // Five requests on distinct, descending-sortable dates.
+        // Mon 3rd to Fri 7th of January 2033 — weekdays, since a
+        // weekend-only request is rejected for having no working days.
+        for (let day = 3; day <= 7; day += 1) {
+            await createLeaveRequest({
+                employeeId: employee.id,
+                leaveTypeId: leaveType.id,
+                startDate: `2033-01-0${day}`,
+                endDate: `2033-01-0${day}`,
+            });
+        }
+        const hrAgent = await loginAs(hr);
+
+        const firstPage = await hrAgent.get("/api/leave-requests").query({ limit: 2, offset: 0 });
+        expect(firstPage.statusCode).toBe(200);
+        expect(firstPage.body.data.requests).toHaveLength(2);
+        // `total` counts every matching row, not the page.
+        expect(firstPage.body.data.total).toBe(5);
+        // Newest first, so the page starts at the 5th of January.
+        expect(firstPage.body.data.requests[0].start_date).toContain("2033-01-07");
+
+        const secondPage = await hrAgent.get("/api/leave-requests").query({ limit: 2, offset: 2 });
+        expect(secondPage.body.data.requests).toHaveLength(2);
+        expect(secondPage.body.data.total).toBe(5);
+        // No overlap with page 1.
+        const firstIds = firstPage.body.data.requests.map((row) => row.id);
+        expect(secondPage.body.data.requests.some((row) => firstIds.includes(row.id))).toBe(false);
+
+        const lastPage = await hrAgent.get("/api/leave-requests").query({ limit: 2, offset: 4 });
+        expect(lastPage.body.data.requests).toHaveLength(1);
+    });
+
+    it("counts the filtered set, not the whole scope", async () => {
+        const hr = await createRootHr({ email: "browse-count-hr@example.com" });
+        const employeeA = await createUser({ email: "browse-count-a@example.com", managerId: hr.id });
+        const employeeB = await createUser({ email: "browse-count-b@example.com", managerId: hr.id });
+        const leaveType = await createLeaveType({ name: "Browse Count Leave" });
+        await createLeaveRequest({
+            employeeId: employeeA.id,
+            leaveTypeId: leaveType.id,
+            startDate: "2033-02-01",
+            endDate: "2033-02-02",
+        });
+        await createLeaveRequest({
+            employeeId: employeeB.id,
+            leaveTypeId: leaveType.id,
+            startDate: "2033-02-03",
+            endDate: "2033-02-04",
+        });
+        const hrAgent = await loginAs(hr);
+
+        const all = await hrAgent.get("/api/leave-requests");
+        expect(all.body.data.total).toBe(2);
+
+        const filtered = await hrAgent.get("/api/leave-requests").query({ employeeId: employeeA.id });
+        expect(filtered.body.data.total).toBe(1);
+        expect(filtered.body.data.requests).toHaveLength(1);
+    });
+
+    it("rejects a limit above the cap so nobody can ask for the whole table", async () => {
+        const hr = await createRootHr({ email: "browse-cap-hr@example.com" });
+        const hrAgent = await loginAs(hr);
+
+        expect((await hrAgent.get("/api/leave-requests").query({ limit: 5000 })).statusCode).toBe(422);
+        expect((await hrAgent.get("/api/leave-requests").query({ offset: -1 })).statusCode).toBe(422);
     });
 });
 

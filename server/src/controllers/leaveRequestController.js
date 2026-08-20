@@ -37,10 +37,34 @@ export async function listMine(req, res, next) {
     }
 }
 
+// Paginated `{ requests, total }`, same envelope as the browse and
+// notification lists. `req.query` carries either a page (limit/offset) or a
+// window (startDate/endDate) — see teamLeaveRequestsQuerySchema.
 export async function listTeam(req, res, next) {
     try {
-        const requests = await leaveRequestService.listTeamLeaveRequests(req.user);
-        sendSuccess(res, 200, "Leave requests retrieved", requests);
+        const { rows, total } = await leaveRequestService.listTeamLeaveRequests(req.user, req.query);
+        sendSuccess(res, 200, "Leave requests retrieved", { requests: rows, total });
+    } catch (error) {
+        next(error);
+    }
+}
+
+// Count-only siblings of listTeam below — see the service functions for why
+// the sidebar badge and the dashboard tile don't fetch the rows and count
+// them client-side any more.
+export async function pendingCount(req, res, next) {
+    try {
+        const count = await leaveRequestService.countPendingDecisions(req.user);
+        sendSuccess(res, 200, "Pending count retrieved", { count });
+    } catch (error) {
+        next(error);
+    }
+}
+
+export async function onLeaveToday(req, res, next) {
+    try {
+        const requests = await leaveRequestService.listOnLeaveToday(req.user);
+        sendSuccess(res, 200, "On leave today retrieved", requests);
     } catch (error) {
         next(error);
     }
@@ -48,8 +72,8 @@ export async function listTeam(req, res, next) {
 
 export async function listAll(req, res, next) {
     try {
-        const requests = await leaveRequestService.listAllLeaveRequests();
-        sendSuccess(res, 200, "Leave requests retrieved", requests);
+        const { rows, total } = await leaveRequestService.listAllLeaveRequests(req.query);
+        sendSuccess(res, 200, "Leave requests retrieved", { requests: rows, total });
     } catch (error) {
         next(error);
     }
@@ -57,10 +81,12 @@ export async function listAll(req, res, next) {
 
 // FR-024: HR's filterable browse view. `req.query` is already validated and
 // coerced by validateQuery(listLeaveRequestsQuerySchema) before this runs.
+// Paginated: `{ requests, total }`, the same envelope the notifications list
+// uses (`{ notifications, total }`) so the client has one pagination idiom.
 export async function listFiltered(req, res, next) {
     try {
-        const requests = await leaveRequestService.listFilteredLeaveRequests(req.user, req.query);
-        sendSuccess(res, 200, "Leave requests retrieved", requests);
+        const { rows, total } = await leaveRequestService.listFilteredLeaveRequests(req.user, req.query);
+        sendSuccess(res, 200, "Leave requests retrieved", { requests: rows, total });
     } catch (error) {
         next(error);
     }

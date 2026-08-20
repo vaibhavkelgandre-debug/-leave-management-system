@@ -3,6 +3,7 @@ import app from "../../app.js";
 import { describe, it, expect } from "vitest";
 import {
     createRootHr,
+    createSuperAdmin,
     createUser,
     createLeaveType,
     createHoliday,
@@ -666,12 +667,13 @@ describe("Leave requests", () => {
 
             const managerAAgent = await loginAs(managerA);
             const teamAResponse = await managerAAgent.get("/api/leave-requests/team");
-            expect(teamAResponse.body.data).toHaveLength(1);
-            expect(teamAResponse.body.data[0].employee_id).toBe(employeeOfA.id);
+            expect(teamAResponse.body.data.requests).toHaveLength(1);
+            expect(teamAResponse.body.data.requests[0].employee_id).toBe(employeeOfA.id);
 
             const hrAgent = await loginAs(hr);
             const teamHrResponse = await hrAgent.get("/api/leave-requests/team");
-            expect(teamHrResponse.body.data).toHaveLength(2);
+            expect(teamHrResponse.body.data.requests).toHaveLength(2);
+            expect(teamHrResponse.body.data.total).toBe(2);
         });
 
         it("scopes HR's /team list to their own branch, not another HR admin's — this app supports more than one HR_ADMIN", async () => {
@@ -706,8 +708,8 @@ describe("Leave requests", () => {
             const hrAAgent = await loginAs(hrA);
             const response = await hrAAgent.get("/api/leave-requests/team");
 
-            expect(response.body.data).toHaveLength(1);
-            expect(response.body.data[0].employee_id).toBe(employeeOfA.id);
+            expect(response.body.data.requests).toHaveLength(1);
+            expect(response.body.data.requests[0].employee_id).toBe(employeeOfA.id);
         });
 
         it("returns an empty list, not a 403, for a plain employee with no reports and no active delegation", async () => {
@@ -720,7 +722,8 @@ describe("Leave requests", () => {
             const agent = await loginAs(employee);
             const response = await agent.get("/api/leave-requests/team");
             expect(response.statusCode).toBe(200);
-            expect(response.body.data).toEqual([]);
+            expect(response.body.data.requests).toEqual([]);
+            expect(response.body.data.total).toBe(0);
         });
 
         it("merges a currently-delegated manager's team into the delegate's own team list", async () => {
@@ -747,14 +750,119 @@ describe("Leave requests", () => {
 
             const delegateAgent = await loginAs(delegateEmployee);
             const response = await delegateAgent.get("/api/leave-requests/team");
-            expect(response.body.data).toHaveLength(1);
-            expect(response.body.data[0].employee_id).toBe(employeeOfManager.id);
-            expect(response.body.data[0].manager_first_name).toBe(manager.first_name);
+            expect(response.body.data.requests).toHaveLength(1);
+            expect(response.body.data.requests[0].employee_id).toBe(employeeOfManager.id);
+            expect(response.body.data.requests[0].manager_first_name).toBe(manager.first_name);
         });
     });
 
-    describe("all requests (HR company-wide view)", () => {
-        it("shows an HR admin every request in the company, including other HR admins' branches", async () => {
+    // The /team and /all lists take either a page (limit/offset) or a window
+    // (startDate+endDate) — never neither, and never both meaningfully. The
+    // window exists for the approvals calendar, which needs a whole month at
+    // once; a page of a busy team is not "this month".
+    describe("team list pagination and windowing", () => {
+        async function seedFiveRequests(email) {
+            const hr = await createRootHr({ email: `page-hr-${email}` });
+            const manager = await createUser({ role: "MANAGER", managerId: hr.id, email: `page-mgr-${email}` });
+            const employee = await createUser({ managerId: manager.id, email: `page-emp-${email}` });
+            const leaveType = await createLeaveType({ name: `Page Leave ${email}`, annualEntitlement: 30 });
+            // Mon 4th to Fri 8th of January 2032 — weekdays, since a
+            // weekend-only request has no working days and is rejected.
+            for (let day = 5; day <= 9; day += 1) {
+                await createLeaveRequest({
+                    employeeId: employee.id,
+                    leaveTypeId: leaveType.id,
+                    startDate: `2032-01-0${day}`,
+                    endDate: `2032-01-0${day}`,
+                });
+            }
+            return { manager, employee, leaveType };
+        }
+
+        it("defaults to one page and reports the total", async () => {
+            const { manager } = await seedFiveRequests("default@example.com");
+            const agent = await loginAs(manager);
+
+            const response = await agent.get("/api/leave-requests/team").query({ limit: 2 });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data.requests).toHaveLength(2);
+            expect(response.body.data.total).toBe(5);
+        });
+
+        it("honours offset without overlapping the previous page", async () => {
+            const { manager } = await seedFiveRequests("offset@example.com");
+            const agent = await loginAs(manager);
+
+            const first = await agent.get("/api/leave-requests/team").query({ limit: 2, offset: 0 });
+            const second = await agent.get("/api/leave-requests/team").query({ limit: 2, offset: 2 });
+
+            const firstIds = first.body.data.requests.map((row) => row.id);
+            expect(second.body.data.requests).toHaveLength(2);
+            expect(second.body.data.requests.some((row) => firstIds.includes(row.id))).toBe(false);
+            expect(second.body.data.total).toBe(5);
+        });
+
+        // The calendar's shape: everything overlapping the window, whatever
+        // page the list happens to be on.
+        it("returns every request in a window, unpaged", async () => {
+            const { manager } = await seedFiveRequests("window@example.com");
+            const agent = await loginAs(manager);
+
+            const response = await agent
+                .get("/api/leave-requests/team")
+                .query({ startDate: "2032-01-01", endDate: "2032-01-31" });
+
+            expect(response.statusCode).toBe(200);
+            expect(response.body.data.requests).toHaveLength(5);
+        });
+
+        it("excludes requests outside the window", async () => {
+            const { manager } = await seedFiveRequests("outside@example.com");
+            const agent = await loginAs(manager);
+
+            const response = await agent
+                .get("/api/leave-requests/team")
+                .query({ startDate: "2032-02-01", endDate: "2032-02-28" });
+
+            expect(response.body.data.requests).toHaveLength(0);
+            expect(response.body.data.total).toBe(0);
+        });
+
+        // Without these guards the window would be the unbounded query this
+        // endpoint was paginated to remove.
+        it("rejects a half-open window, a backwards one, and one longer than the cap", async () => {
+            const hr = await createRootHr({ email: "page-guard-hr@example.com" });
+            const agent = await loginAs(hr);
+
+            expect((await agent.get("/api/leave-requests/team").query({ startDate: "2032-01-01" })).statusCode).toBe(422);
+            expect((await agent.get("/api/leave-requests/team").query({ endDate: "2032-01-01" })).statusCode).toBe(422);
+            expect(
+                (
+                    await agent
+                        .get("/api/leave-requests/team")
+                        .query({ startDate: "2032-03-01", endDate: "2032-01-01" })
+                ).statusCode
+            ).toBe(422);
+            expect(
+                (
+                    await agent
+                        .get("/api/leave-requests/team")
+                        .query({ startDate: "2000-01-01", endDate: "2100-01-01" })
+                ).statusCode
+            ).toBe(422);
+            expect((await agent.get("/api/leave-requests/team").query({ limit: 5000 })).statusCode).toBe(422);
+        });
+    });
+
+    describe("all requests (company-wide view)", () => {
+        // SUPER_ADMIN's alone now (narrowed on direct request): an HR admin's
+        // view of leave is their own branch, which GET /team already gives
+        // them — scoping this endpoint for HR would have returned exactly the
+        // same rows, so the company-wide view belongs to the one role above
+        // every branch.
+        it("shows SUPER_ADMIN every request in the company, across separate HR branches", async () => {
+            const superAdmin = await createSuperAdmin({ email: "all-super@example.com" });
             const hrA = await createRootHr({ email: "all-hrA@example.com" });
             const hrB = await createRootHr({ email: "all-hrB@example.com" });
             const managerOfA = await createUser({ role: "MANAGER", managerId: hrA.id, email: "all-mgr-of-hrA@example.com" });
@@ -783,21 +891,57 @@ describe("Leave requests", () => {
                 endDate: "2030-12-16",
             });
 
-            const hrAAgent = await loginAs(hrA);
-            const response = await hrAAgent.get("/api/leave-requests/all");
+            const superAgent = await loginAs(superAdmin);
+            const response = await superAgent.get("/api/leave-requests/all");
 
             expect(response.statusCode).toBe(200);
-            const employeeIds = response.body.data.map((request) => request.employee_id);
+            const employeeIds = response.body.data.requests.map((request) => request.employee_id);
             expect(employeeIds).toEqual(expect.arrayContaining([employeeOfA.id, employeeOfB.id]));
+
+            // The same call from an HR admin is refused outright — not scoped,
+            // refused, so there's no second way to reach another branch.
+            const hrAAgent = await loginAs(hrA);
+            expect((await hrAAgent.get("/api/leave-requests/all")).statusCode).toBe(403);
         });
 
-        it("rejects a non-HR caller — a manager only ever gets their own branch via /team, never company-wide", async () => {
+        it("rejects a manager — they only ever get their own branch via /team, never company-wide", async () => {
             const manager = await createUser({ role: "MANAGER", email: "all-nonhr-mgr@example.com" });
             const agent = await loginAs(manager);
 
             const response = await agent.get("/api/leave-requests/all");
 
             expect(response.statusCode).toBe(403);
+        });
+
+        // The detail endpoint has to agree with the list: an HR admin who
+        // can't see another branch's requests in a list shouldn't be able to
+        // fetch one by id either, while SUPER_ADMIN — who alone gets the
+        // company-wide list — must be able to open any row in it.
+        it("scopes GET /:id for HR to their own branch, but leaves it company-wide for SUPER_ADMIN", async () => {
+            const superAdmin = await createSuperAdmin({ email: "detail-super@example.com" });
+            const hrA = await createRootHr({ email: "detail-hrA@example.com" });
+            const hrB = await createRootHr({ email: "detail-hrB@example.com" });
+            const employeeOfB = await createUser({
+                role: "EMPLOYEE",
+                managerId: hrB.id,
+                email: "detail-emp-of-hrB@example.com",
+            });
+            const leaveType = await createLeaveType({ name: "Detail Scope Leave", annualEntitlement: 10 });
+            const request = await createLeaveRequest({
+                employeeId: employeeOfB.id,
+                leaveTypeId: leaveType.id,
+                startDate: "2030-11-11",
+                endDate: "2030-11-12",
+            });
+
+            const hrAAgent = await loginAs(hrA);
+            expect((await hrAAgent.get(`/api/leave-requests/${request.id}`)).statusCode).toBe(404);
+
+            const hrBAgent = await loginAs(hrB);
+            expect((await hrBAgent.get(`/api/leave-requests/${request.id}`)).statusCode).toBe(200);
+
+            const superAgent = await loginAs(superAdmin);
+            expect((await superAgent.get(`/api/leave-requests/${request.id}`)).statusCode).toBe(200);
         });
     });
 

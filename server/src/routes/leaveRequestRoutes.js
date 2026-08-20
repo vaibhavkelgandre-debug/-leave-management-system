@@ -16,6 +16,7 @@ import {
     overrideSchema,
     listLeaveRequestsQuerySchema,
     leaveTakenReportQuerySchema,
+    teamLeaveRequestsQuerySchema,
 } from "../validators/leaveRequestValidator.js";
 
 const router = express.Router();
@@ -35,13 +36,28 @@ router.get("/mine", controller.listMine);
 // is active. The service scopes the actual result — direct reports, plus
 // any currently-delegated team, plus everything for HR — so an ordinary
 // employee with neither just gets back an empty list, not a 403.
-router.get("/team", controller.listTeam);
-// HR's company-wide "All Requests" view (read-only from the UI's own
+router.get("/team", validateQuery(teamLeaveRequestsQuerySchema), controller.listTeam);
+// Both are static paths registered before "/:id" (see this file's header) and
+// deliberately have no role gate: each is scoped to the caller server-side
+// exactly like /team is, so an employee with nothing in scope gets 0 / an
+// empty list rather than a 403. They exist so the sidebar badge and the
+// dashboard tile stop downloading the whole team history to render one number
+// and a handful of rows — the same reason GET /notifications/unread-count
+// exists alongside GET /notifications.
+router.get("/pending-count", controller.pendingCount);
+router.get("/on-leave-today", controller.onLeaveToday);
+// The company-wide "All Requests" view (read-only from the UI's own
 // perspective — see listAllLeaveRequests). A plain role check is correct
 // here, same reasoning as most other team/HR-scoped routes: "can you see
 // the whole company's requests at all" is a role question, not a
 // per-record one.
-router.get("/all", requireRole("HR_ADMIN", "SUPER_ADMIN"), controller.listAll);
+//
+// SUPER_ADMIN only, narrowed from HR_ADMIN+SUPER_ADMIN on direct request:
+// an HR_ADMIN now only ever sees their own branch's requests. Scoping this
+// endpoint for HR instead of removing their access would have returned
+// exactly the same rows as GET /team already does for them, so the
+// company-wide view belongs to the one role that sits above every branch.
+router.get("/all", requireRole("SUPER_ADMIN"), validateQuery(teamLeaveRequestsQuerySchema), controller.listAll);
 // FR-024: HR's filterable browse view and leave-taken report. All three are
 // HR-only by a plain role check, same reasoning as /all above — filtering
 // doesn't change who's allowed to see the results, it's still "everyone",

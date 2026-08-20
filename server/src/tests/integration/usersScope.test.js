@@ -69,3 +69,62 @@ describe("Sensitive profile field masking", () => {
         expect(managerResponse.body.data.current_address).toBe("1 Example Street");
     });
 });
+
+// The picker-sized projection behind every dropdown in the app: same scoping
+// rules as GET /users, five columns instead of ~40. It exists because four
+// surfaces were fetching every profile field of every user (~240KB at 200
+// people) purely to render a name in a <select>.
+describe("GET /api/users/options (picker projection)", () => {
+    it("returns only id, name, role and status — no profile or sensitive fields", async () => {
+        const hr = await createRootHr({ email: "options-hr@example.com" });
+        const employee = await createUser({ email: "options-emp@example.com", managerId: hr.id });
+        const hrAgent = await loginAs(hr);
+        // Give the employee something in every sensitive column, so their
+        // absence from the response is proof rather than coincidence.
+        await (await loginAs(employee)).patch("/api/users/me/profile").send({
+            panNumber: "ABCDE1234F",
+            aadharNumber: "123456789012",
+            bankAccountNumber: "000111222333",
+            phone: "9876543210",
+        });
+
+        const response = await hrAgent.get("/api/users/options");
+
+        expect(response.statusCode).toBe(200);
+        const row = response.body.data.find((user) => user.id === employee.id);
+        expect(Object.keys(row).sort()).toEqual(["first_name", "id", "last_name", "role", "status"]);
+        expect(row.role).toBe("EMPLOYEE");
+        // Explicitly: the columns masking exists for aren't merely masked here,
+        // they're never selected.
+        expect(row.pan_number).toBeUndefined();
+        expect(row.aadhar_number).toBeUndefined();
+        expect(row.bank_account_number).toBeUndefined();
+        expect(row.password_hash).toBeUndefined();
+    });
+
+    it("scopes exactly like GET /users: company-wide for HR, subtree for a manager, self for an employee", async () => {
+        const hr = await createRootHr({ email: "options-scope-hr@example.com" });
+        const manager = await createUser({ role: "MANAGER", email: "options-scope-mgr@example.com", managerId: hr.id });
+        const report = await createUser({ email: "options-scope-report@example.com", managerId: manager.id });
+        const otherHr = await createRootHr({ email: "options-scope-otherhr@example.com" });
+        const outsider = await createUser({ email: "options-scope-outsider@example.com", managerId: otherHr.id });
+
+        const hrIds = (await (await loginAs(hr)).get("/api/users/options")).body.data.map((user) => user.id);
+        expect(hrIds).toEqual(expect.arrayContaining([manager.id, report.id, outsider.id]));
+
+        const managerRows = (await (await loginAs(manager)).get("/api/users/options")).body.data;
+        const managerIds = managerRows.map((user) => user.id);
+        expect(managerIds).toEqual(expect.arrayContaining([manager.id, report.id]));
+        expect(managerIds).not.toContain(outsider.id);
+
+        const employeeRows = (await (await loginAs(report)).get("/api/users/options")).body.data;
+        expect(employeeRows.map((user) => user.id)).toEqual([report.id]);
+    });
+
+    it("requires authentication", async () => {
+        const response = await (await import("supertest")).default(
+            (await import("../../app.js")).default
+        ).get("/api/users/options");
+        expect(response.statusCode).toBe(401);
+    });
+});

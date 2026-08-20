@@ -54,6 +54,36 @@ export async function getMyDocumentUrl(req, res, next) {
     }
 }
 
+// Streams a document's bytes through this app rather than handing the
+// browser a Cloudinary URL. `disposition=inline` (the default here, unlike
+// the salary-slip endpoint's `attachment` default) is what makes an <iframe>
+// actually render a PDF instead of downloading it — Cloudinary serves raw
+// assets as attachments, so previewing one is only possible from a response
+// we control. `attachment` stays available for a real save-to-disk.
+//
+// The filename is stripped of quotes/newlines before interpolation (same
+// guard as leaveRequestController.downloadDocument) — it's user-supplied via
+// the original upload, and a stray quote would break the header.
+export async function getDocumentFile(req, res, next) {
+    try {
+        const { stream, filename, mimeType } = await employeeDocumentService.getDocumentFile(
+            req.user,
+            req.params.documentId
+        );
+        const disposition = req.query.disposition === "attachment" ? "attachment" : "inline";
+        const safeFilename = filename.replace(/["\r\n]/g, "");
+        res.setHeader("Content-Type", mimeType);
+        res.setHeader(
+            "Content-Disposition",
+            `${disposition}; filename="${safeFilename}"; filename*=UTF-8''${encodeURIComponent(filename)}`
+        );
+        stream.on("error", next);
+        stream.pipe(res);
+    } catch (error) {
+        next(error);
+    }
+}
+
 export async function uploadCustomDocument(req, res, next) {
     try {
         const document = await employeeDocumentService.uploadCustomDocument(req.user.id, req.body.name, req.file);

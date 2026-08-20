@@ -17,13 +17,105 @@ import {
     updateDocumentReview,
     deleteCustomDocumentById,
 } from "../repositories/employeeDocumentRepository.js";
-import { uploadEmployeeDocument, getSignedDocumentUrl, deletePrivateAsset } from "./cloudinaryService.js";
+import {
+    uploadEmployeeDocument,
+    getSignedDocumentUrl,
+    deletePrivateAsset,
+    fetchDocumentStream,
+} from "./cloudinaryService.js";
 import { detectFileType } from "../utils/fileType.js";
 import { badRequest, forbidden, notFound } from "../utils/appError.js";
 
 export const REQUIRED_DOCUMENT_TYPES = ["PAN_CARD", "AADHAR_CARD", "BANK_PASSBOOK", "OFFER_LETTER"];
 
 const ACCEPTED_DOCUMENT_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+
+// Human names for the four required types, needed because the profile
+// verification gates below report *which* documents are blocking — an error
+// reading "PAN_CARD is still pending" would be the enum leaking into a
+// message HR reads. The client has its own copy for its list UI
+// (EmployeeDocumentList.jsx); this one exists for error messages, which are
+// composed server-side.
+const DOCUMENT_TYPE_LABELS = {
+    PAN_CARD: "PAN card",
+    AADHAR_CARD: "Aadhar card",
+    BANK_PASSBOOK: "Bank passbook",
+    OFFER_LETTER: "Signed offer letter",
+};
+
+function labelList(documentTypes) {
+    return documentTypes.map((type) => DOCUMENT_TYPE_LABELS[type] ?? type).join(", ");
+}
+
+// Groups an employee's required documents by what's blocking verification.
+// Custom ('OTHER') documents are deliberately excluded from every bucket:
+// they're optional extras, never part of the verification gate.
+async function categorizeRequiredDocuments(employeeId) {
+    const documents = await findDocumentsByEmployeeId(employeeId);
+    const byType = new Map(
+        documents.filter((document) => document.document_type !== "OTHER").map((document) => [document.document_type, document])
+    );
+
+    return {
+        missing: REQUIRED_DOCUMENT_TYPES.filter((type) => !byType.has(type)),
+        rejected: REQUIRED_DOCUMENT_TYPES.filter((type) => byType.get(type)?.status === "REJECTED"),
+        pending: REQUIRED_DOCUMENT_TYPES.filter((type) => byType.get(type)?.status === "PENDING_REVIEW"),
+    };
+}
+
+// Input: the employee whose profile HR is trying to verify. Output: nothing.
+// Failure mode: 400 naming the documents that are in the way.
+//
+// Verifying the *profile* used to check only the profile's own status, so a
+// document could sit unreviewed — or outright rejected — while the profile
+// it belongs to was marked VERIFIED, which is the one outcome this whole
+// review step exists to prevent. Every required document must be VERIFIED
+// individually first; that's the gate, not a warning.
+//
+// Rejections are reported before pending ones because they need a different
+// action from HR: a pending document is theirs to review right now, while a
+// rejected one can only be fixed by the employee re-uploading, which means
+// sending the profile back (userService.sendProfileBack) rather than
+// clicking Verify again.
+export async function assertRequiredDocumentsVerified(employeeId) {
+    const { missing, rejected, pending } = await categorizeRequiredDocuments(employeeId);
+
+    if (rejected.length > 0) {
+        const wasWere = rejected.length === 1 ? "was" : "were";
+        throw badRequest(
+            `${labelList(rejected)} ${wasWere} rejected as not matching the details provided. Send the profile back so the employee can re-upload, then verify once the new copy checks out.`
+        );
+    }
+
+    if (missing.length > 0) {
+        throw badRequest(`These documents haven't been uploaded yet: ${labelList(missing)}.`);
+    }
+
+    if (pending.length > 0) {
+        throw badRequest(
+            `Review every document before verifying the profile — still pending: ${labelList(pending)}.`
+        );
+    }
+}
+
+// Input: the employee resubmitting their own profile. Output: nothing.
+// Failure mode: 400 naming the documents they still have to replace.
+//
+// The other half of the loop above: once HR sends a profile back over a
+// rejected document, resubmitting without replacing that document would
+// land HR right back on the same blocked Verify button. A re-upload resets
+// the row to PENDING_REVIEW (upsertEmployeeDocument), so "replaced" and
+// "no longer rejected" are the same condition.
+export async function assertNoRejectedDocuments(employeeId) {
+    const { rejected } = await categorizeRequiredDocuments(employeeId);
+
+    if (rejected.length > 0) {
+        const it = rejected.length === 1 ? "it" : "them";
+        throw badRequest(
+            `Replace the rejected document${rejected.length === 1 ? "" : "s"} before resubmitting — HR couldn't match ${it} to your details: ${labelList(rejected)}.`
+        );
+    }
+}
 
 async function assertCanView(actor, employeeId) {
     if (actor.id === employeeId) return;
@@ -107,7 +199,13 @@ export async function getDocumentUrl(actor, employeeId, documentType) {
         throw notFound("Document not found");
     }
 
+    // `documentId` is what lets a caller ask for the bytes through this app
+    // instead of the Cloudinary URL (see getDocumentFile) — needed by the
+    // viewer, which can only preview a PDF via the proxy. Returned alongside
+    // the signed URL rather than replacing it: the URL is still the cheaper
+    // path for an image, and dropping it would break every existing caller.
     return {
+        documentId: document.id,
         url: getSignedDocumentUrl(document.cloudinary_public_id, document.cloudinary_resource_type),
         filename: document.original_filename,
         mimeType: document.mime_type,
@@ -126,10 +224,42 @@ export async function getDocumentUrlById(actor, employeeId, documentId) {
     }
 
     return {
+        documentId: document.id,
         url: getSignedDocumentUrl(document.cloudinary_public_id, document.cloudinary_resource_type),
         filename: document.original_filename,
         mimeType: document.mime_type,
     };
+}
+
+// Input: the actor and a document row id (required or custom — both live in
+// employee_documents, so one lookup covers all of them). Output:
+// `{ stream, filename, mimeType }` — the document's bytes proxied through
+// this app rather than handed to the browser as a Cloudinary URL. Failure
+// modes: 404 if the document doesn't exist or the actor can't view its
+// owner's documents; rejects if Cloudinary's own fetch fails.
+//
+// This exists because a Cloudinary URL can't be previewed. PDFs are stored
+// as `resource_type: "raw"` (uploadPrivateAsset) and raw delivery serves
+// them as an attachment, so pointing an <iframe> at the signed URL made the
+// browser download the file the instant HR opened the viewer — with no way
+// to just *look* at it, which is exactly what reviewing a document is. Since
+// the disposition is the delivering server's to set, the only fix is to
+// deliver it ourselves: same-origin, correct `Content-Type`, and whichever
+// `Content-Disposition` the caller asked for (employeeController).
+//
+// Two things fall out of proxying that are worth keeping: the signed URL
+// never reaches the DOM, and the five-minute expiry stops mattering to a
+// viewer left open (each request mints a fresh one).
+export async function getDocumentFile(actor, documentId) {
+    const document = await findDocumentById(documentId);
+    if (!document) {
+        throw notFound("Document not found");
+    }
+    await assertCanView(actor, document.employee_id);
+
+    const url = getSignedDocumentUrl(document.cloudinary_public_id, document.cloudinary_resource_type);
+    const stream = await fetchDocumentStream(url);
+    return { stream, filename: document.original_filename, mimeType: document.mime_type };
 }
 
 // Self-only — an employee removing a custom document they added by mistake.

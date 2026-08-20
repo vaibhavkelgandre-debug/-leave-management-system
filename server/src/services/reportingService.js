@@ -1,4 +1,9 @@
-import { findSubtreeUsers, findUserById, isUserInSubtree } from "../repositories/userRepository.js";
+import {
+    findSubtreeUsers,
+    countSubtreeUsers,
+    findUserById,
+    isUserInSubtree,
+} from "../repositories/userRepository.js";
 import { badRequest, conflict } from "../utils/appError.js";
 
 // Encodes the reporting-line hierarchy rule for the org: an EMPLOYEE may
@@ -23,6 +28,13 @@ const ALLOWED_MANAGER_ROLES = {
 export async function getTeam(userId) {
     const subtree = await findSubtreeUsers(userId);
     return subtree.filter((user) => user.id !== userId);
+}
+
+// The count-only counterpart to getTeam above, for the dashboard's headcount
+// chip — see userRepository.countSubtreeUsers for why that tile shouldn't be
+// pulling every row of a 200-person subtree to read `.length`.
+export async function getTeamSize(userId) {
+    return countSubtreeUsers(userId);
 }
 
 // Shared by invite (brand-new user, no cycle possible yet) and reassignment

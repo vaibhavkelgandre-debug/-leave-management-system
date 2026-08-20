@@ -9,7 +9,7 @@ import * as salaryStructureController from "../controllers/salaryStructureContro
 import { requireAuth } from "../middlewares/authMiddleware.js";
 import { requireRole } from "../middlewares/requireRole.js";
 import { uploadEmployeeDocument } from "../middlewares/uploadMiddleware.js";
-import { validateBody, validateParams } from "../validators/validate.js";
+import { validateBody, validateParams, validateQuery } from "../validators/validate.js";
 import {
     employeeIdParamSchema,
     documentTypeParamSchema,
@@ -19,11 +19,28 @@ import {
     customDocumentUploadSchema,
     documentIdParamSchema,
     sendProfileBackSchema,
+    documentDispositionQuerySchema,
 } from "../validators/employeeValidator.js";
 
 const router = express.Router();
 
 router.use(requireAuth);
+
+// Registered before every "/:id/..." route below: "documents" is a literal
+// first segment, so leaving it later would be fine today, but the file's
+// convention is static-before-dynamic and this is the one route whose first
+// segment could ever be mistaken for an employee id.
+//
+// Serves any document row — a required one or a custom one, the caller's own
+// or (for HR in scope) someone else's — since authorization comes from the
+// row itself (employeeDocumentService.getDocumentFile), exactly like salary
+// slips' "/:id" and leave requests' "/:id".
+router.get(
+    "/documents/:documentId/file",
+    validateParams(documentIdParamSchema),
+    validateQuery(documentDispositionQuerySchema),
+    controller.getDocumentFile
+);
 
 // Registered before /me/documents/:documentType below — "custom" would
 // otherwise be swallowed by that dynamic segment (Express matches routes in

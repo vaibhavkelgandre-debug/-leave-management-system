@@ -8,7 +8,12 @@
 import request from "supertest";
 import { describe, it, expect } from "vitest";
 import app from "../../app.js";
-import { createSuperAdmin, createUser, createLeaveType } from "./helpers/factories.js";
+import {
+    createSuperAdmin,
+    createUser,
+    createLeaveType,
+    verifyAllEmployeeDocuments,
+} from "./helpers/factories.js";
 import { loginAs } from "./helpers/authHelpers.js";
 
 const PDF_BYTES = Buffer.from("%PDF-1.4\n%mock pdf content for tests");
@@ -145,6 +150,12 @@ describe("SUPER_ADMIN", () => {
         await hrAgent.post("/api/employees/me/profile/submit");
 
         const superAgent = await loginAs(superAdmin);
+
+        // A profile is only verifiable once each of its documents is (see
+        // userService.verifyProfile) — setup for the scope assertions below,
+        // which are what this test is actually about.
+        await verifyAllEmployeeDocuments(hrAdmin.id, superAdmin.id);
+        await verifyAllEmployeeDocuments(employee.id, hrAdmin.id);
 
         // SUPER_ADMIN CAN verify their direct-report HR_ADMIN's own profile.
         const verifyHr = await superAgent.post(`/api/employees/${hrAdmin.id}/verify`);

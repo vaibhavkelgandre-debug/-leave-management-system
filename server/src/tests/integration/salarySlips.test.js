@@ -74,12 +74,106 @@ describe("Salary slips (calculated payroll)", () => {
         const response = await agent.post("/api/salary-slips/calculate").send({ payPeriod: monthsAgo(2) });
 
         expect(response.statusCode).toBe(200);
-        expect(response.body.data.summary).toEqual({ total: 2, ok: 0, skipped: 2 });
+        expect(response.body.data.summary).toEqual({ total: 2, ok: 0, skipped: 2, alreadyGenerated: 0 });
         const unverifiedRow = response.body.data.rows.find((row) => row.employeeId === unverified.id);
         const noStructureRow = response.body.data.rows.find((row) => row.employeeId === noStructure.id);
         expect(unverifiedRow.skipReason).toMatch(/not yet verified/i);
         expect(noStructureRow.skipReason).toMatch(/no salary structure/i);
     });
+
+    // A zero-value payslip is worse than none: to the employee it reads as
+    // "we paid you nothing this month" and it occupies the (employee,
+    // pay_period) slot, so the corrected run has to be voided first.
+    it("skips an employee whose net pay works out to zero, keeping the figures visible", async () => {
+        const hr = await createRootHr({ email: "slip-zero-hr@example.com" });
+        const employee = await createUser({ email: "slip-zero-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        // Deductions exactly cancel earnings — the realistic version of this
+        // is a full month of unpaid leave, but this shape is deterministic.
+        await createSalaryStructure({
+            employeeId: employee.id,
+            basicSalary: 10000,
+            hra: 0,
+            specialAllowance: 0,
+            pfEmployeeContribution: 10000,
+            pfEmployerContribution: 0,
+            esic: 0,
+            incomeTax: 0,
+            actorId: hr.id,
+        });
+        const agent = await loginAs(hr);
+        const payPeriod = monthsAgo(6);
+
+        const preview = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
+        const row = preview.body.data.rows.find((r) => r.employeeId === employee.id);
+        expect(row.status).toBe("skipped");
+        expect(row.skipReason).toMatch(/zero or less/i);
+        // The figures stay attached so HR can see *why* it came to zero.
+        expect(Number(row.computed.netPay)).toBe(0);
+        expect(preview.body.data.summary.ok).toBe(0);
+
+        // And approving commits nothing for them.
+        const confirm = await agent.post("/api/salary-slips/confirm").send({ payPeriod });
+        expect(confirm.body.data.committed).toHaveLength(0);
+        expect(confirm.body.data.skipped.map((r) => r.employeeId)).toContain(employee.id);
+
+        const slips = await pool.query("SELECT id FROM salary_slips WHERE employee_id = $1", [employee.id]);
+        expect(slips.rows).toHaveLength(0);
+    });
+
+    // Previously this was only discovered at confirm time, so the preview
+    // said "Ready" for someone who was then silently skipped on approve.
+    it("reports an employee who already holds a slip for the period as already_generated in the preview", async () => {
+        const hr = await createRootHr({ email: "slip-already-hr@example.com" });
+        const employee = await createUser({ email: "slip-already-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const agent = await loginAs(hr);
+        const payPeriod = monthsAgo(7);
+
+        const firstConfirm = await agent.post("/api/salary-slips/confirm").send({ payPeriod });
+        expect(firstConfirm.body.data.committed).toHaveLength(1);
+
+        const preview = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
+        const row = preview.body.data.rows.find((r) => r.employeeId === employee.id);
+        expect(row.status).toBe("already_generated");
+        expect(row.skipReason).toMatch(/already received/i);
+        expect(row.computed).toBeNull();
+        expect(preview.body.data.summary.ok).toBe(0);
+        expect(preview.body.data.summary.alreadyGenerated).toBe(1);
+
+        // A second approve changes nothing, and the original slip stays put.
+        const secondConfirm = await agent.post("/api/salary-slips/confirm").send({ payPeriod });
+        expect(secondConfirm.body.data.committed).toHaveLength(0);
+        expect(secondConfirm.body.data.skipped.map((r) => r.employeeId)).toContain(employee.id);
+
+        const slips = await pool.query(
+            "SELECT id, status FROM salary_slips WHERE employee_id = $1 AND pay_period = $2",
+            [employee.id, payPeriod]
+        );
+        expect(slips.rows).toHaveLength(1);
+        expect(slips.rows[0].id).toBe(firstConfirm.body.data.committed[0].id);
+    }, 20000);
+
+    // Voiding is how a period is reopened — the preview has to agree with
+    // that, or a corrected run looks impossible.
+    it("returns an employee to ready once their existing slip is voided", async () => {
+        const hr = await createRootHr({ email: "slip-void-ready-hr@example.com" });
+        const employee = await createUser({ email: "slip-void-ready-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const agent = await loginAs(hr);
+        const payPeriod = monthsAgo(8);
+
+        const confirmed = await agent.post("/api/salary-slips/confirm").send({ payPeriod });
+        const slipId = confirmed.body.data.committed[0].id;
+        await agent.post(`/api/salary-slips/${slipId}/void`).send({ reason: "Wrong structure" });
+
+        const preview = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
+        const row = preview.body.data.rows.find((r) => r.employeeId === employee.id);
+        expect(row.status).toBe("ok");
+        expect(preview.body.data.summary.alreadyGenerated).toBe(0);
+    }, 20000);
 
     it("calculates net pay from the structure, writing nothing until confirmed", async () => {
         const hr = await createRootHr({ email: "slip-calc-hr@example.com" });
@@ -172,22 +266,6 @@ describe("Salary slips (calculated payroll)", () => {
         expect(slips.rows[0].count).toBe(1);
     });
 
-    it("still previews full figures via calculate for a period that already has an ACTIVE slip — the guard only blocks confirm", async () => {
-        const hr = await createRootHr({ email: "slip-preview-active-hr@example.com" });
-        const employee = await createUser({ email: "slip-preview-active-emp@example.com", managerId: hr.id });
-        await verifyEmployeeProfile(employee.id, hr.id);
-        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
-        const agent = await loginAs(hr);
-        const payPeriod = monthsAgo(15);
-
-        await agent.post("/api/salary-slips/confirm").send({ payPeriod });
-
-        const preview = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
-        const row = preview.body.data.rows.find((r) => r.employeeId === employee.id);
-        expect(row.status).toBe("ok");
-        expect(row.computed).not.toBeNull();
-    });
-
     it("rejects calculate and confirm for a pay period that hasn't started yet", async () => {
         const hr = await createRootHr({ email: "slip-future-hr@example.com" });
         const agent = await loginAs(hr);
@@ -229,7 +307,8 @@ describe("Salary slips (calculated payroll)", () => {
 
         const agentA = await loginAs(hrA);
         const listResponse = await agentA.get("/api/salary-slips");
-        expect(listResponse.body.data).toHaveLength(0);
+        expect(listResponse.body.data.slips).toHaveLength(0);
+        expect(listResponse.body.data.total).toBe(0);
     });
 
     it("gives HR their own (empty) slip list on /mine, distinct from their team's slips on /", async () => {
@@ -245,8 +324,8 @@ describe("Salary slips (calculated payroll)", () => {
         expect(mine.body.data).toHaveLength(0);
 
         const team = await hrAgent.get("/api/salary-slips");
-        expect(team.body.data).toHaveLength(1);
-        expect(team.body.data[0].employee_id).toBe(employee.id);
+        expect(team.body.data.slips).toHaveLength(1);
+        expect(team.body.data.slips[0].employee_id).toBe(employee.id);
     });
 
     it("narrows /mine to one pay period, and / to one role, without needing employeeId", async () => {
@@ -274,9 +353,47 @@ describe("Salary slips (calculated payroll)", () => {
         expect(mineFiltered.body.data[0].pay_period).toBe(periodA);
 
         const roleFiltered = await hrAgent.get("/api/salary-slips?role=MANAGER");
-        expect(roleFiltered.body.data).toHaveLength(2);
-        expect(roleFiltered.body.data.every((slip) => slip.employee_id === manager.id)).toBe(true);
+        expect(roleFiltered.body.data.slips).toHaveLength(2);
+        expect(roleFiltered.body.data.total).toBe(2);
+        expect(roleFiltered.body.data.slips.every((slip) => slip.employee_id === manager.id)).toBe(true);
     });
+
+    // The HR list spans every payroll month ever run, so it's paginated with
+    // the same `{ rows, total }` contract as the leave-request lists. /mine is
+    // deliberately left unpaginated — one person's own ~36 rows.
+    it("pages the HR list and counts the filtered set, leaving /mine unpaginated", async () => {
+        const hr = await createRootHr({ email: "slip-page-hr@example.com" });
+        const employee = await createUser({ email: "slip-page-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const hrAgent = await loginAs(hr);
+
+        // Three separate months for one employee => three slips.
+        for (const offset of [8, 9, 10]) {
+            await hrAgent.post("/api/salary-slips/confirm").send({ payPeriod: monthsAgo(offset) });
+        }
+
+        const firstPage = await hrAgent.get("/api/salary-slips").query({ limit: 2, offset: 0 });
+        expect(firstPage.statusCode).toBe(200);
+        expect(firstPage.body.data.slips).toHaveLength(2);
+        expect(firstPage.body.data.total).toBe(3);
+
+        const secondPage = await hrAgent.get("/api/salary-slips").query({ limit: 2, offset: 2 });
+        expect(secondPage.body.data.slips).toHaveLength(1);
+        const firstIds = firstPage.body.data.slips.map((slip) => slip.id);
+        expect(firstIds).not.toContain(secondPage.body.data.slips[0].id);
+
+        // `total` follows the filters, not the whole scope.
+        const filtered = await hrAgent.get("/api/salary-slips").query({ payPeriod: monthsAgo(9) });
+        expect(filtered.body.data.total).toBe(1);
+
+        // An employee's own history is a bare array, unpaginated.
+        const mine = await (await loginAs(employee)).get("/api/salary-slips/mine");
+        expect(Array.isArray(mine.body.data)).toBe(true);
+        expect(mine.body.data).toHaveLength(3);
+
+        expect((await hrAgent.get("/api/salary-slips").query({ limit: 5000 })).statusCode).toBe(422);
+    }, 20000);
 
     it("only calculates for employees matching an optional role/profileStatus filter", async () => {
         const hr = await createRootHr({ email: "slip-filter-hr@example.com" });

@@ -12,6 +12,7 @@ import {
     createLeaveType,
     createLeaveRequest,
     verifyEmployeeProfile,
+    verifyAllEmployeeDocuments,
     createSalaryStructure,
 } from "./helpers/factories.js";
 import { loginAs } from "./helpers/authHelpers.js";
@@ -248,6 +249,9 @@ describe("Notification triggers", () => {
         expect(sendBackNotification.message).toBe("Your profile was sent back: Fix bank details");
 
         await agent.post("/api/employees/me/profile/submit");
+        // The profile can only be verified once every document is (see
+        // userService.verifyProfile) — setup here, not the thing under test.
+        await verifyAllEmployeeDocuments(employee.id, hr.id);
         await hrAgent.post(`/api/employees/${employee.id}/verify`);
         const afterVerify = (await agent.get("/api/notifications")).body.data.notifications;
         expect(afterVerify.some((n) => n.type === "PROFILE_VERIFIED")).toBe(true);

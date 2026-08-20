@@ -251,6 +251,79 @@ export async function updateProfileFields(id, fields) {
     return findUserById(id);
 }
 
+// Input: a root user id. Output: how many people are under them in the
+// reporting tree, excluding themselves, as an int.
+//
+// The count-only counterpart to findSubtreeUsers above, for the dashboard's
+// headcount chip: that function returns every row with all ~40 public
+// columns (~240KB for 200 people) where the tile only ever reads
+// `team.length`. Same recursive CTE and the same depth guard, so the two can
+// never disagree about who's in the subtree.
+// Just enough of a user to render an option in a picker: who they are, what
+// role they hold, and whether the account is usable. Five columns instead of
+// PUBLIC_USER_COLUMNS' ~40 — the four surfaces that fetch a user list purely
+// to fill a dropdown (invite form, delegation form, HR reports, salary slips)
+// were pulling every profile field, including the masked government-ID and
+// bank ones, for ~240KB per page load at NFR-7's 200 employees.
+//
+// `status` is included because pickers care: a delegation can only name an
+// ACTIVE user, and an INVITED account isn't a valid manager yet.
+const USER_OPTION_COLUMNS = `
+    u.id,
+    u.first_name,
+    u.last_name,
+    r.role_name AS role,
+    u.status
+`;
+
+export async function findAllUserOptions() {
+    const result = await pool.query(
+        `SELECT ${USER_OPTION_COLUMNS}
+         FROM users u
+         JOIN roles r ON r.id = u.role_id
+         ORDER BY u.first_name, u.last_name`
+    );
+    return result.rows;
+}
+
+// Subtree variant, for a MANAGER — same recursion and depth guard as
+// findSubtreeUsers, so the two can't disagree about who's in the subtree.
+export async function findSubtreeUserOptions(rootId) {
+    const result = await pool.query(
+        `WITH RECURSIVE subtree AS (
+            SELECT id, manager_id, 0 AS depth FROM users WHERE id = $1
+            UNION
+            SELECT u.id, u.manager_id, s.depth + 1
+            FROM users u
+            JOIN subtree s ON u.manager_id = s.id
+            WHERE s.depth < 20
+        )
+        SELECT ${USER_OPTION_COLUMNS}
+        FROM users u
+        JOIN roles r ON r.id = u.role_id
+        JOIN subtree s ON s.id = u.id
+        ORDER BY u.first_name, u.last_name`,
+        [rootId]
+    );
+    return result.rows;
+}
+
+export async function countSubtreeUsers(rootId) {
+    const result = await pool.query(
+        `WITH RECURSIVE subtree AS (
+            SELECT id, manager_id, 0 AS depth FROM users WHERE id = $1
+            UNION
+            SELECT u.id, u.manager_id, s.depth + 1
+            FROM users u
+            JOIN subtree s ON u.manager_id = s.id
+            WHERE s.depth < 20
+        )
+        SELECT COUNT(*)::int AS count FROM subtree WHERE id <> $1`,
+        [rootId]
+    );
+    return result.rows[0].count;
+}
+
 export async function findDirectReports(managerId) {
     const result = await pool.query(
         `SELECT ${PUBLIC_USER_COLUMNS}

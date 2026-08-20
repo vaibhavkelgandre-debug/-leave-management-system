@@ -5,6 +5,8 @@ import {
     findPasswordHashById,
     findReportingLine,
     findSubtreeUsers,
+    findAllUserOptions,
+    findSubtreeUserOptions,
     findUserById,
     findVerifiedEmployees,
     updateManager,
@@ -14,7 +16,11 @@ import {
     updateStatus,
 } from "../repositories/userRepository.js";
 import { findDocumentsByEmployeeId } from "../repositories/employeeDocumentRepository.js";
-import { REQUIRED_DOCUMENT_TYPES } from "./employeeDocumentService.js";
+import {
+    REQUIRED_DOCUMENT_TYPES,
+    assertRequiredDocumentsVerified,
+    assertNoRejectedDocuments,
+} from "./employeeDocumentService.js";
 import { assertNoCycle } from "./reportingService.js";
 import { isInActorsHrScope, getHrScopedEmployeeIds } from "./hrScopeService.js";
 import { assertLegalProfileTransition } from "./profileVerificationStateMachine.js";
@@ -99,6 +105,27 @@ export async function listUsersFor(actor) {
     return maskSensitiveProfileFieldsForList(users, actor);
 }
 
+// The picker-sized counterpart to listUsersFor above: the same scoping rules,
+// five columns instead of forty. Every dropdown in the app uses this; only the
+// All Employees roster (which really does display every field) still needs the
+// full rows.
+//
+// No masking needed, deliberately: masking only ever applied to the sensitive
+// government-ID and bank columns, and none of them are selected here — so the
+// projection isn't just smaller, it can't leak them at all.
+export async function listUserOptionsFor(actor) {
+    if (actor.role === "HR_ADMIN" || actor.role === "SUPER_ADMIN") {
+        return findAllUserOptions();
+    }
+    if (actor.role === "MANAGER") {
+        return findSubtreeUserOptions(actor.id);
+    }
+    // An employee sees only themselves, matching listUsersFor — a picker with
+    // one option is odd, but the alternative is a role check at every call site.
+    const self = await findUserById(actor.id);
+    return self ? [{ id: self.id, first_name: self.first_name, last_name: self.last_name, role: self.role, status: self.status }] : [];
+}
+
 // A user viewing their own profile also gets a quick summary of who's above
 // them in the reporting chain: their direct manager, and the nearest
 // HR-tier ancestor — whoever will actually end up verifying their profile,
@@ -165,6 +192,12 @@ export async function submitProfileForVerification(actorId) {
         throw badRequest("Please upload all required documents before submitting");
     }
 
+    // Blocks the "resubmit without fixing anything" loop: if HR sent this
+    // profile back because a document didn't match, resubmitting the same
+    // rejected document just hands them the same blocked Verify button
+    // again (see assertRequiredDocumentsVerified).
+    await assertNoRejectedDocuments(actorId);
+
     const newStatus = assertLegalProfileTransition("SUBMIT", user.profile_status);
     await updateProfileStatus(actorId, { status: newStatus });
     const submittedUser = await findUserById(actorId);
@@ -177,6 +210,11 @@ export async function submitProfileForVerification(actorId) {
 // HR-tier-only, scoped via isInActorsHrScope (HR_ADMIN's own subtree, or
 // SUPER_ADMIN's direct-report HR_ADMINs only — see hrScopeService.js) —
 // moves a SUBMITTED profile to VERIFIED, recording who verified it and when.
+//
+// Every required document must already be individually VERIFIED
+// (assertRequiredDocumentsVerified, 400 otherwise). Checked after the state
+// transition so "you already verified this" still answers 409 rather than
+// being reported as a document problem.
 export async function verifyProfile(actor, employeeId) {
     if (actor.role !== "HR_ADMIN" && actor.role !== "SUPER_ADMIN") {
         throw forbidden("Only HR can verify a profile");
@@ -187,6 +225,7 @@ export async function verifyProfile(actor, employeeId) {
     }
 
     const newStatus = assertLegalProfileTransition("VERIFY", employee.profile_status);
+    await assertRequiredDocumentsVerified(employeeId);
     await updateProfileStatus(employeeId, { status: newStatus, verifiedBy: actor.id, verifiedAt: new Date() });
     await notifyProfileVerified(employeeId, actor.id); // non-critical side effect
     return findUserById(employeeId);
@@ -274,23 +313,30 @@ export async function changeMyPassword(actorId, { currentPassword, newPassword }
     await updatePasswordHash(actorId, newHash);
 }
 
-// Auth is strict per-team, not "any HR admin can manage everyone": a
-// target's reporting line can only be edited by whoever created them
-// (`invited_by`, see userRepository.js), for every role, not just
-// HR_ADMIN — same mechanism and same reasoning as changeStatus below.
-// Without this, an HR admin with no reports of their own (or reports
-// outside a given branch entirely) could still re-parent a completely
-// unrelated team's employees, which is exactly the "any HR admin sees a
-// filtered view of every branch" bug already fixed for FR-024's browse/
-// report tools, just showing up here for the write side of the Employees
-// page instead. A target with no `invited_by` at all (a root HR_ADMIN who
-// registered via POST /auth/register/hr) can't be edited by anyone here,
-// same reasoning: there's no legitimate "their own creator" to grant that to.
+// Auth is strict per-team, not "any HR admin can manage everyone" — but
+// "per-team" now means the acting HR admin's own reporting subtree, not only
+// the accounts they personally created. Either grants the edit:
+//
+//   1. `actor.id === target.invited_by` — whoever created the account.
+//   2. `isInActorsHrScope(actor, id)` — the target sits inside the actor's
+//      own HR scope (an HR_ADMIN's subtree; SUPER_ADMIN's direct-report
+//      HR_ADMINs only, see hrScopeService.js).
+//
+// (2) was added on direct request, so HR can manage everyone on their own
+// team from My Team — creator-only meant no controls at all for anyone HR
+// inherited rather than invited (another HR admin's joiner, or any account
+// predating the invitation records), which read as a missing feature.
+//
+// What it deliberately still refuses is unchanged and is the point of the
+// check: an HR admin cannot touch a *different branch's* people, since a
+// subtree walk never reaches sideways or upward — so SUPER_ADMIN can't be
+// re-parented or deactivated from below either (nobody's subtree contains
+// the root), which used to be guaranteed by the "no `invited_by`" rule.
 export async function changeManager(id, managerId, actor) {
     const target = await getUserById(id, actor);
 
-    if (actor.id !== target.invited_by) {
-        throw forbidden("Only the HR admin who created this account can change who they report to");
+    if (actor.id !== target.invited_by && !(await isInActorsHrScope(actor, id))) {
+        throw forbidden("You can only change the reporting line of someone on your own team");
     }
 
     await assertNoCycle(id, managerId, target.role);
@@ -310,22 +356,18 @@ export async function changeManager(id, managerId, actor) {
     return getUserById(id, actor);
 }
 
-// Activating/deactivating a user is restricted to whoever created them
-// (`invited_by`) — same mechanism, and same reasoning, as changeManager's
-// HR_ADMIN restriction above, but applied to every role: any HR admin can
-// still *see* everyone (listUsersFor), just not toggle a status they didn't
-// create. A user with no `invited_by` at all (a root HR_ADMIN registered
-// via POST /auth/register/hr) can't be deactivated by anyone through this
-// endpoint — deliberately, there's no legitimate "their creator" to grant
-// that to, matching changeManager's same edge case.
+// Activating/deactivating a user takes the same two-way check as
+// changeManager above — the account's creator, or an HR-tier actor whose own
+// scope contains them — for every role. Any HR admin can still *see*
+// everyone (listUsersFor); this governs who may toggle a status.
 export async function changeStatus(id, status, actor) {
     if (id === actor.id && status === "INACTIVE") {
         throw badRequest("You cannot deactivate your own account");
     }
 
     const target = await getUserById(id, actor);
-    if (actor.id !== target.invited_by) {
-        throw forbidden("Only the HR admin who created this account can change its status");
+    if (actor.id !== target.invited_by && !(await isInActorsHrScope(actor, id))) {
+        throw forbidden("You can only change the status of someone on your own team");
     }
 
     const updated = await updateStatus(id, status);

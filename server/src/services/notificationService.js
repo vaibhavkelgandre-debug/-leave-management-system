@@ -459,3 +459,25 @@ export async function notifyInviteAccepted(newUserId, actorId) {
         console.error("Failed to create INVITE_ACCEPTED notification:", error.message);
     }
 }
+
+// The flip side of notifyInviteAccepted above: that one tells the inviter
+// someone joined, this one tells the new employee themself what to do next
+// — their account is active but their profile_status is still INCOMPLETE at
+// this point (submitting for verification is a separate, later step they
+// take on their own), so without this they'd have no prompt at all beyond
+// whatever HR tells them out of band.
+export async function notifyProfileCreated(newUserId, actorId) {
+    try {
+        await insertNotification({
+            recipientId: newUserId,
+            actorId,
+            type: "PROFILE_CREATED",
+            entityType: "PROFILE",
+            entityId: newUserId,
+            message:
+                "Profile successfully created. Please complete your profile details and upload your mandatory documents, then submit them to HR for verification.",
+        });
+    } catch (error) {
+        console.error("Failed to create PROFILE_CREATED notification:", error.message);
+    }
+}

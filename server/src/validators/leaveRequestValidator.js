@@ -4,6 +4,12 @@ import { z } from "zod";
 
 const dateStringSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "date must be in YYYY-MM-DD format");
 
+// Shared by every paginated list here. 62 days covers the widest month
+// grid a calendar can show (42) with room to spare, while still being a
+// bound rather than an invitation to request a decade.
+const DEFAULT_PAGE_SIZE = 25;
+const MAX_WINDOW_DAYS = 62;
+
 // Submitting with a document attached sends multipart/form-data (so multer
 // can read the file), which arrives as string fields for everything else —
 // unlike a plain JSON body, "false" comes through as the string "false", not
@@ -70,6 +76,60 @@ export const overrideSchema = z.object({
     comment: z.string().trim().min(1, "A reason is required to override a decision"),
 });
 
+// Query params for the team/approvals lists (GET /leave-requests/team and
+// /all). Two bounded shapes, and no unbounded one — that's the whole point:
+//
+//   - a **page**: `limit`/`offset`, defaulting to the first 25, for the list;
+//   - a **window**: `startDate`+`endDate`, for the approvals calendar, which
+//     needs every request overlapping the month it's showing (a page can't
+//     express that — page 1 of a busy team is not "this month").
+//
+// A window needs no `limit` because the window itself bounds it, but only if
+// the window can't be widened indefinitely: hence both dates are required
+// together and the span is capped at 62 days (a month grid spans at most 42).
+// Without that cap, `?startDate=1900-01-01&endDate=2100-01-01` would be the
+// unbounded query this endpoint was paginated to remove.
+export const teamLeaveRequestsQuerySchema = z
+    .object({
+        startDate: dateStringSchema.optional(),
+        endDate: dateStringSchema.optional(),
+        limit: z.coerce.number().int().min(1).max(100).optional(),
+        offset: z.coerce.number().int().min(0).optional().default(0),
+    })
+    .superRefine((data, ctx) => {
+        const hasStart = Boolean(data.startDate);
+        const hasEnd = Boolean(data.endDate);
+        if (hasStart !== hasEnd) {
+            ctx.addIssue({
+                code: "custom",
+                path: [hasStart ? "endDate" : "startDate"],
+                message: "startDate and endDate must be given together",
+            });
+            return;
+        }
+        if (!hasStart) return;
+        if (data.endDate < data.startDate) {
+            ctx.addIssue({ code: "custom", path: ["endDate"], message: "endDate must be on or after startDate" });
+            return;
+        }
+        const spanDays = (new Date(data.endDate) - new Date(data.startDate)) / (24 * 60 * 60 * 1000) + 1;
+        if (spanDays > MAX_WINDOW_DAYS) {
+            ctx.addIssue({
+                code: "custom",
+                path: ["endDate"],
+                message: `The date window cannot be longer than ${MAX_WINDOW_DAYS} days`,
+            });
+        }
+    })
+    .transform((data) => ({
+        ...data,
+        // A windowed request is bounded by its window, so it takes no page; an
+        // unwindowed one always gets one. Applied here rather than as a zod
+        // `.default()` so the two shapes can't overlap into "page 1 of this
+        // month", which would silently hide events from the calendar.
+        limit: data.limit ?? (data.startDate ? undefined : DEFAULT_PAGE_SIZE),
+    }));
+
 // FR-024: query params for HR's filterable browse view (GET /leave-requests)
 // — every filter is optional, so an HR admin can start broad and narrow down.
 // `status` covers every value the state machine can ever produce, not just
@@ -82,6 +142,13 @@ export const listLeaveRequestsQuerySchema = z
         status: z.enum(["SUBMITTED", "APPROVED", "REJECTED", "WITHDRAWN", "CANCELLED"]).optional(),
         startDate: dateStringSchema.optional(),
         endDate: dateStringSchema.optional(),
+        // Pagination, same shape and reasoning as
+        // notificationValidator.listNotificationsQuerySchema: coerced because
+        // query-string values are always strings, defaulted so even a caller
+        // that asks for no page still gets a bounded one, and capped so nobody
+        // can request the whole unbounded table with limit=100000.
+        limit: z.coerce.number().int().min(1).max(100).optional().default(25),
+        offset: z.coerce.number().int().min(0).optional().default(0),
     })
     .refine((data) => !data.startDate || !data.endDate || data.endDate >= data.startDate, {
         message: "endDate must be on or after startDate",

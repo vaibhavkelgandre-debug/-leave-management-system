@@ -2,6 +2,10 @@ import { findRoleByName } from "../../../repositories/roleRepository.js";
 import { insertUser, updateProfileStatus } from "../../../repositories/userRepository.js";
 import { insertInvitation } from "../../../repositories/invitationRepository.js";
 import { insertLeaveType } from "../../../repositories/leaveTypeRepository.js";
+import {
+    findDocumentsByEmployeeId,
+    updateDocumentReview,
+} from "../../../repositories/employeeDocumentRepository.js";
 import { insertHoliday } from "../../../repositories/holidayRepository.js";
 import { insertDelegation } from "../../../repositories/delegationRepository.js";
 import { upsertStructure } from "../../../repositories/salaryStructureRepository.js";
@@ -87,6 +91,20 @@ export async function createLeaveType({
 // documents -> HR verifies) — sets profile_status straight to VERIFIED via
 // the repository, for tests that only care about payroll-readiness, not the
 // verification workflow itself (see profileVerification.test.js for that).
+// Marks every required document VERIFIED, the same end state HR reaches by
+// reviewing them one at a time. Needed because POST /employees/:id/verify
+// now refuses while any required document is still PENDING_REVIEW or
+// REJECTED (userService.verifyProfile) — so tests about the *profile*
+// transition would otherwise all have to drive four review requests each to
+// set up a state they aren't testing. Tests of the review endpoint itself
+// still go through HTTP (employeeDocuments.test.js).
+export async function verifyAllEmployeeDocuments(employeeId, reviewedBy) {
+    const documents = await findDocumentsByEmployeeId(employeeId);
+    for (const document of documents.filter((row) => row.document_type !== "OTHER")) {
+        await updateDocumentReview(document.id, { status: "VERIFIED", reviewedBy, reviewComment: null });
+    }
+}
+
 export async function verifyEmployeeProfile(employeeId, verifiedBy) {
     return updateProfileStatus(employeeId, { status: "VERIFIED", verifiedBy, verifiedAt: new Date() });
 }

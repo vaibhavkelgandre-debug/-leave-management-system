@@ -100,31 +100,110 @@ export async function findLeaveRequestsForEmployee(employeeId) {
 // there's nothing left for a manager/HR to act on, so it shouldn't linger in
 // their approvals list. Returns [] without a query for an empty list, since
 // `= ANY('{}')` would otherwise need special-casing.
-export async function findLeaveRequestsForEmployees(employeeIds) {
-    if (employeeIds.length === 0) {
+// The team/approvals list, and — with `employeeIds` omitted — the
+// company-wide one that used to be its own `findAllLeaveRequests`. Both
+// always excluded WITHDRAWN and ordered newest-submitted-first; they only
+// ever differed in whether an employee filter was applied, so one function
+// now covers both rather than two near-identical queries drifting apart.
+//
+// `undefined` employeeIds means "no employee restriction" (company-wide, for
+// SUPER_ADMIN); `[]` means "nobody" and short-circuits — the same convention
+// findLeaveRequestsFiltered uses, and the reason this can't just check for
+// falsiness.
+//
+// Two bounded shapes, deliberately no unbounded one (see
+// teamLeaveRequestsQuerySchema): `limit`/`offset` for a page of the list, or
+// `startDate`/`endDate` for everything overlapping a window — the approvals
+// calendar needs a whole month at once, which a page can't express.
+function buildTeamWhere({ employeeIds, startDate, endDate }) {
+    const conditions = ["lr.status <> 'WITHDRAWN'"];
+    const params = [];
+
+    if (employeeIds) {
+        params.push(employeeIds);
+        conditions.push(`lr.employee_id = ANY($${params.length}::uuid[])`);
+    }
+    // Standard interval-overlap test, same shape as the browse filters.
+    if (startDate) {
+        params.push(startDate);
+        conditions.push(`lr.end_date >= $${params.length}`);
+    }
+    if (endDate) {
+        params.push(endDate);
+        conditions.push(`lr.start_date <= $${params.length}`);
+    }
+
+    return { whereClause: `WHERE ${conditions.join(" AND ")}`, params };
+}
+
+export async function findTeamLeaveRequests(filters = {}) {
+    if (filters.employeeIds && filters.employeeIds.length === 0) {
         return [];
     }
+
+    const { whereClause, params } = buildTeamWhere(filters);
+
+    let pagination = "";
+    if (filters.limit !== undefined) {
+        params.push(filters.limit, filters.offset ?? 0);
+        pagination = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+    }
+
     const result = await pool.query(
-        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM}
-         WHERE lr.employee_id = ANY($1::uuid[]) AND lr.status <> 'WITHDRAWN'
-         ORDER BY lr.created_at DESC`,
-        [employeeIds]
+        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} ${whereClause} ORDER BY lr.created_at DESC ${pagination}`,
+        params
     );
     return result.rows;
 }
 
-// Output: every leave request in the system — HR's view, unscoped by team but
-// still excludes WITHDRAWN for the same reason as findLeaveRequestsForEmployees
-// above.
-export async function findAllLeaveRequests() {
+// Row count for the same filters, so a paginated caller can render
+// "showing 1–25 of N" — see countLeaveRequestsFiltered for the same pattern.
+export async function countTeamLeaveRequests(filters = {}) {
+    if (filters.employeeIds && filters.employeeIds.length === 0) {
+        return 0;
+    }
+
+    const { whereClause, params } = buildTeamWhere(filters);
     const result = await pool.query(
-        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} WHERE lr.status <> 'WITHDRAWN' ORDER BY lr.created_at DESC`
+        `SELECT COUNT(*)::int AS count FROM leave_requests lr ${whereClause}`,
+        params
     );
-    return result.rows;
+    return result.rows[0].count;
+}
+
+
+// Input: the manager ids whose direct reports' requests count as "mine to
+// decide". Output: how many SUBMITTED requests that covers, as an int.
+//
+// Exists so the sidebar badge and the dashboard tile can show one number
+// without downloading the rows behind it — at NFR-7's scale (200 employees,
+// three years) the team list they used to count is thousands of rows and
+// several megabytes, fetched on **every page load**, to render a single
+// integer. Same shape and reasoning as notificationRepository's
+// countUnreadForUser, which the notification bell already uses instead of
+// fetching notifications to count them.
+//
+// Keyed on the *manager* rather than a list of employee ids because "waiting
+// for my decision" is exactly "the employee's assigned manager is me (or
+// someone I'm standing in for)" — see resolveActingCapacity. That also keeps
+// the parameter list short: one array of manager ids instead of a subtree's
+// worth of employee ids.
+export async function countPendingDecisionsForManagers(managerIds) {
+    if (managerIds.length === 0) {
+        return 0;
+    }
+    const result = await pool.query(
+        `SELECT COUNT(*)::int AS count
+         FROM leave_requests lr
+         JOIN users u ON u.id = lr.employee_id
+         WHERE lr.status = 'SUBMITTED' AND u.manager_id = ANY($1::uuid[])`,
+        [managerIds]
+    );
+    return result.rows[0].count;
 }
 
 // FR-024: HR's filterable browse view — every filter is optional and, unlike
-// findAllLeaveRequests above, nothing is excluded by default (a WITHDRAWN
+// findTeamLeaveRequests above, nothing is excluded by default (a WITHDRAWN
 // request is exactly the kind of thing HR might deliberately filter *for*
 // when browsing/reporting, unlike the approvals views where it's just dead
 // weight). The WHERE clause is built up dynamically since every filter is
@@ -133,16 +212,11 @@ export async function findAllLeaveRequests() {
 // filters are present. `startDate`/`endDate` use the standard interval-
 // overlap test (a request overlaps the filter window at all), the same
 // shape already used for holidays and overlap detection elsewhere.
-export async function findLeaveRequestsFiltered({ employeeId, leaveTypeId, status, startDate, endDate, employeeIds } = {}) {
-    // `employeeIds`, when passed, is the acting HR admin's own reporting
-    // subtree (leaveRequestService.listFilteredLeaveRequests) — an
-    // authorization boundary, not a user-facing filter, so it's applied
-    // before any of the optional filters below and short-circuits the query
-    // entirely for an HR admin with no subtree at all.
-    if (employeeIds && employeeIds.length === 0) {
-        return [];
-    }
-
+// The WHERE clause behind both functions below, built once so a paginated
+// page of results and its total can never disagree about what they're
+// counting. Returns the clause plus its parameter list, ready for whatever
+// each caller appends (a LIMIT/OFFSET, nothing at all).
+function buildFilteredWhere({ employeeId, leaveTypeId, status, startDate, endDate, employeeIds }) {
     const conditions = [];
     const params = [];
 
@@ -171,12 +245,58 @@ export async function findLeaveRequestsFiltered({ employeeId, leaveTypeId, statu
         conditions.push(`lr.start_date <= $${params.length}`);
     }
 
-    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+    return { whereClause: conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "", params };
+}
+
+// `limit`/`offset` (both optional) page the results — passed by HR's browse
+// view, omitted by callers that want the whole (already narrow) result set,
+// like listOnLeaveToday's "approved, overlapping today". Omitting them keeps
+// the old unbounded behaviour rather than silently applying a default cap,
+// which would quietly truncate a caller that wasn't expecting pages.
+//
+// `ORDER BY lr.start_date DESC` is what makes paging stable, and is why
+// migration 037 adds (employee_id, start_date DESC): without it, every page
+// sorts the whole filtered set before discarding all but one page's worth.
+export async function findLeaveRequestsFiltered(filters = {}) {
+    // `employeeIds`, when passed, is the acting HR admin's own reporting
+    // subtree (leaveRequestService.listFilteredLeaveRequests) — an
+    // authorization boundary, not a user-facing filter, so it's applied
+    // before any of the optional filters below and short-circuits the query
+    // entirely for an HR admin with no subtree at all.
+    if (filters.employeeIds && filters.employeeIds.length === 0) {
+        return [];
+    }
+
+    const { whereClause, params } = buildFilteredWhere(filters);
+
+    let pagination = "";
+    if (filters.limit !== undefined) {
+        params.push(filters.limit, filters.offset ?? 0);
+        pagination = `LIMIT $${params.length - 1} OFFSET $${params.length}`;
+    }
+
     const result = await pool.query(
-        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} ${whereClause} ORDER BY lr.start_date DESC`,
+        `SELECT ${JOINED_COLUMNS} ${JOINED_FROM} ${whereClause} ORDER BY lr.start_date DESC ${pagination}`,
         params
     );
     return result.rows;
+}
+
+// The row count for the exact same filters, so a paginated caller can render
+// "showing 1–25 of 4,312" and know whether a next page exists. Same shape as
+// notificationRepository's countNotificationsForUser, which backs the only
+// other paginated list in the app.
+export async function countLeaveRequestsFiltered(filters = {}) {
+    if (filters.employeeIds && filters.employeeIds.length === 0) {
+        return 0;
+    }
+
+    const { whereClause, params } = buildFilteredWhere(filters);
+    const result = await pool.query(
+        `SELECT COUNT(*)::int AS count FROM leave_requests lr ${whereClause}`,
+        params
+    );
+    return result.rows[0].count;
 }
 
 // FR-024's "report of leave taken per employee over a period": one row per
@@ -275,4 +395,21 @@ export async function findLopWorkingDays(employeeId, startDate, endDate) {
         [employeeId, startDate, endDate]
     );
     return Number(result.rows[0].lop_days);
+}
+
+// Module 5 v2: total leave days for one employee's payroll period -- same
+// overlap query as findLopWorkingDays above, but summed across every leave
+// type (not just ones flagged counts_as_lop), so a slip can show "total
+// leave taken" as a superset of the LOP-only figure rather than nothing at
+// all for leave that doesn't affect pay.
+export async function findTotalLeaveWorkingDays(employeeId, startDate, endDate) {
+    const result = await pool.query(
+        `SELECT COALESCE(SUM(lr.working_days), 0) AS total_leave_days
+         FROM leave_requests lr
+         WHERE lr.employee_id = $1
+           AND lr.status = 'APPROVED'
+           AND lr.end_date >= $2 AND lr.start_date <= $3`,
+        [employeeId, startDate, endDate]
+    );
+    return Number(result.rows[0].total_leave_days);
 }

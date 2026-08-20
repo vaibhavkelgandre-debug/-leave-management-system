@@ -37,8 +37,10 @@ export async function listMine(req, res, next) {
 
 export async function listForHr(req, res, next) {
     try {
-        const slips = await salarySlipService.listSalarySlipsForHr(req.user, req.query);
-        sendSuccess(res, 200, "Salary slips retrieved", slips);
+        // Paginated `{ slips, total }` — same envelope shape as the leave-request
+        // and notification lists.
+        const { rows, total } = await salarySlipService.listSalarySlipsForHr(req.user, req.query);
+        sendSuccess(res, 200, "Salary slips retrieved", { slips: rows, total });
     } catch (error) {
         next(error);
     }

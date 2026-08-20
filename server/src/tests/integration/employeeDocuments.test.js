@@ -3,10 +3,12 @@
 // mocked (same pattern as leaveRequestDocuments.test.js) — these tests
 // exercise the real DB and the real visibility/review rules.
 import request from "supertest";
+import { Readable } from "node:stream";
 import { vi, describe, it, expect } from "vitest";
 import app from "../../app.js";
 import { createRootHr, createUser } from "./helpers/factories.js";
 import { loginAs } from "./helpers/authHelpers.js";
+import * as cloudinaryService from "../../services/cloudinaryService.js";
 
 vi.mock("../../services/cloudinaryService.js", () => ({
     uploadLeaveRequestDocument: vi.fn(),
@@ -80,6 +82,63 @@ describe("Employee documents", () => {
 
         const outsiderAgent = await loginAs(outsider);
         expect((await outsiderAgent.get(`/api/employees/${employee.id}/documents`)).statusCode).toBe(404);
+    });
+
+    // The bytes are served by this app, not Cloudinary: PDFs are stored as
+    // Cloudinary `raw` assets, whose delivery forces `Content-Disposition:
+    // attachment`, so HR clicking "View" on a PDF downloaded it instead of
+    // showing it. Previewing is only possible from a response we control —
+    // hence this endpoint, and hence `inline` being its default.
+    it("streams a document inline by default so it can actually be previewed", async () => {
+        const hr = await createRootHr({ email: "empdoc-file-hr@example.com" });
+        const employee = await createUser({ email: "empdoc-file-emp@example.com", managerId: hr.id });
+        const agent = await loginAs(employee);
+
+        await agent
+            .post("/api/employees/me/documents/PAN_CARD")
+            .attach("file", PDF_BYTES, { filename: "pan card.pdf", contentType: "application/pdf" });
+        const documentId = (await agent.get("/api/employees/me/documents")).body.data[0].id;
+
+        cloudinaryService.fetchDocumentStream.mockResolvedValue(Readable.from([PDF_BYTES]));
+        const hrAgent = await loginAs(hr);
+        const response = await hrAgent.get(`/api/employees/documents/${documentId}/file`);
+
+        expect(response.statusCode).toBe(200);
+        expect(response.headers["content-type"]).toBe("application/pdf");
+        expect(response.headers["content-disposition"]).toMatch(/^inline;/);
+        expect(response.headers["content-disposition"]).toContain('filename="pan card.pdf"');
+        expect(response.body).toEqual(PDF_BYTES);
+
+        // `attachment` stays available for a real save-to-disk.
+        cloudinaryService.fetchDocumentStream.mockResolvedValue(Readable.from([PDF_BYTES]));
+        const download = await hrAgent.get(`/api/employees/documents/${documentId}/file?disposition=attachment`);
+        expect(download.headers["content-disposition"]).toMatch(/^attachment;/);
+
+        // The `/url` payload carries the id the viewer needs to build that
+        // request in the first place.
+        const urlResponse = await hrAgent.get(`/api/employees/${employee.id}/documents/PAN_CARD/url`);
+        expect(urlResponse.body.data.documentId).toBe(documentId);
+    });
+
+    it("404s a document stream for a peer employee, and 422s a malformed id", async () => {
+        const hr = await createRootHr({ email: "empdoc-file-authz-hr@example.com" });
+        const employee = await createUser({ email: "empdoc-file-authz-emp@example.com", managerId: hr.id });
+        const outsider = await createUser({ email: "empdoc-file-authz-outsider@example.com" });
+        const agent = await loginAs(employee);
+
+        await agent
+            .post("/api/employees/me/documents/PAN_CARD")
+            .attach("file", PDF_BYTES, { filename: "pan.pdf", contentType: "application/pdf" });
+        const documentId = (await agent.get("/api/employees/me/documents")).body.data[0].id;
+
+        const outsiderAgent = await loginAs(outsider);
+        expect((await outsiderAgent.get(`/api/employees/documents/${documentId}/file`)).statusCode).toBe(404);
+        expect((await request(app).get(`/api/employees/documents/${documentId}/file`)).statusCode).toBe(401);
+        expect((await agent.get("/api/employees/documents/not-a-uuid/file")).statusCode).toBe(422);
+        // A disposition outside the two real values can't reach the header.
+        expect(
+            (await agent.get(`/api/employees/documents/${documentId}/file?disposition=whatever`)).statusCode
+        ).toBe(422);
     });
 
     it("404s a self URL lookup for a document that was never uploaded", async () => {

@@ -2,7 +2,9 @@ import express from "express";
 import {
     inviteEmployee,
     getUsers,
+    getUserOptions,
     getMyTeam,
+    getMyTeamSize,
     getUserById,
     updateManager,
     updateStatus,
@@ -29,10 +31,16 @@ router.use(requireAuth);
 
 router.post("/invite", requireRole("HR_ADMIN", "SUPER_ADMIN"), validateBody(inviteEmployeeSchema), inviteEmployee);
 router.get("/me/team", getMyTeam);
+// Registered next to /me/team, and before the dynamic "/:id" below like every
+// other static path in this file.
+router.get("/me/team/count", getMyTeamSize);
 // Self-only by construction (always req.user.id, no :id param) — no
 // requireUserScope needed, unlike GET /:id below.
 router.patch("/me/profile", validateBody(updateMyProfileSchema), updateMyProfile);
 router.post("/me/password", validateBody(changePasswordSchema), changePassword);
+// Before "/:id" like every other static path here. Same scoping as GET "/",
+// five columns wide — for the dropdowns that don't need a whole profile each.
+router.get("/options", getUserOptions);
 router.get("/", getUsers);
 // requireUserScope restricts non-HR callers to only fetch their own record or
 // direct reports, so employees/managers can't read arbitrary users by id.
