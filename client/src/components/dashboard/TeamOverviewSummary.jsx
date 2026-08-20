@@ -1,30 +1,40 @@
-// Dashboard tile: what a manager (or HR) can act on right now — pending
-// approvals count + review link, who's on approved leave today, team
-// headcount. getTeamLeaveRequests() is already scoped server-side (direct
-// reports for a manager, everyone for HR), so this component doesn't need
-// to know which role it's rendering for.
+// Dashboard tile: what a manager (or HR, or the super admin) can act on right
+// now — pending approvals count + review link, who's on approved leave today
+// as a table, headcount.
+//
+// One deliberate role branch, and only one: which endpoint feeds it.
+// `getTeamLeaveRequests()` is scoped server-side to what the caller can *act*
+// on — direct reports for a manager, their own branch for HR, and (because
+// SUPER_ADMIN's HR scope is its direct-report HR admins only) almost nobody
+// for the super admin, who would otherwise see an empty "on leave today" for
+// a company full of people out. `getMyTeam()` is already whole-company for
+// them (a transitive subtree walk from the root), so the headcount and the
+// leave list would disagree without this. SUPER_ADMIN therefore reads the
+// company-wide list it alone is allowed to fetch (GET /leave-requests/all).
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CalendarDays, CheckCircle2, Clock, Users } from "lucide-react";
-import { getTeamLeaveRequests } from "../../services/leaveRequestService.js";
+import { getAllLeaveRequests, getTeamLeaveRequests } from "../../services/leaveRequestService.js";
 import { getMyTeam } from "../../services/userService.js";
 import { useAuth } from "../../hooks/useAuth.js";
+import { ROLES } from "../../constants/roles.js";
 import { canDecideDirectly } from "../../utils/leaveRequestAuthz.js";
+import { OnLeaveTodayTable } from "./OnLeaveTodayTable.jsx";
 import { Card } from "../ui/Card.jsx";
 import { Button } from "../ui/Button.jsx";
-import { Avatar } from "../ui/Avatar.jsx";
-import { Badge, RoleBadge } from "../ui/Badge.jsx";
-import { formatDateRange, todayDateKey } from "../../utils/dates.js";
+import { todayDateKey } from "../../utils/dates.js";
 
 export function TeamOverviewSummary() {
-    const { user } = useAuth();
+    const { user, hasAnyRole } = useAuth();
+    const isSuperAdmin = hasAnyRole([ROLES.SUPER_ADMIN]);
     const [requests, setRequests] = useState(null);
     const [teamSize, setTeamSize] = useState(null);
 
     useEffect(() => {
         let cancelled = false;
 
-        Promise.all([getTeamLeaveRequests(), getMyTeam()])
+        const fetchRequests = isSuperAdmin ? getAllLeaveRequests : getTeamLeaveRequests;
+        Promise.all([fetchRequests(), getMyTeam()])
             .then(([requestData, team]) => {
                 if (cancelled) return;
                 setRequests(requestData);
@@ -39,7 +49,7 @@ export function TeamOverviewSummary() {
         return () => {
             cancelled = true;
         };
-    }, []);
+    }, [isSuperAdmin]);
 
     if (requests === null) {
         return (
@@ -59,14 +69,22 @@ export function TeamOverviewSummary() {
     const pending = requests.filter(
         (request) => request.status === "SUBMITTED" && canDecideDirectly(request, user)
     );
-    const onLeaveToday = requests.filter(
-        (request) => request.status === "APPROVED" && request.start_date <= today && request.end_date >= today
-    );
+    // Sorted by name rather than left in request-creation order — a table is
+    // read down a column, so "who's out" should be scannable alphabetically.
+    const onLeaveToday = requests
+        .filter((request) => request.status === "APPROVED" && request.start_date <= today && request.end_date >= today)
+        .sort((a, b) =>
+            `${a.employee_first_name} ${a.employee_last_name}`.localeCompare(
+                `${b.employee_first_name} ${b.employee_last_name}`
+            )
+        );
 
     return (
         <Card className="p-6">
             <div className="flex items-center justify-between gap-3">
-                <h2 className="text-lg font-semibold text-slate-900">Team overview</h2>
+                <h2 className="text-lg font-semibold text-slate-900">
+                    {isSuperAdmin ? "Organisation overview" : "Team overview"}
+                </h2>
                 <span className="flex items-center gap-1.5 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
                     <Users className="h-3.5 w-3.5" aria-hidden="true" />
                     {teamSize} {teamSize === 1 ? "person" : "people"}
@@ -108,40 +126,14 @@ export function TeamOverviewSummary() {
                 <h3 className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
                     <CalendarDays className="h-4 w-4 text-slate-400" aria-hidden="true" />
                     On leave today
+                    {onLeaveToday.length > 0 && (
+                        <span className="text-xs font-normal text-slate-500">({onLeaveToday.length})</span>
+                    )}
                 </h3>
-                {onLeaveToday.length > 0 ? (
-                    <ul className="mt-2 space-y-2.5">
-                        {onLeaveToday.map((request) => {
-                            const workingDays = Number(request.working_days);
-                            const isHalfDay = request.start_half_day || request.end_half_day;
-                            return (
-                                <li key={request.id} className="flex flex-wrap items-center gap-2.5">
-                                    <Avatar
-                                        firstName={request.employee_first_name}
-                                        lastName={request.employee_last_name}
-                                        size="sm"
-                                    />
-                                    <span className="shrink-0 text-sm font-medium text-slate-700">
-                                        {request.employee_first_name} {request.employee_last_name}
-                                    </span>
-                                    <RoleBadge role={request.employee_role} />
-                                    <span className="shrink-0 text-xs text-slate-500">{request.employee_email}</span>
-                                    <span className="shrink-0 text-xs text-slate-400">·</span>
-                                    <span className="shrink-0 text-xs text-slate-500">
-                                        {formatDateRange(request.start_date, request.end_date)} · {workingDays} day
-                                        {workingDays === 1 ? "" : "s"}
-                                        {isHalfDay && " (half day)"}
-                                    </span>
-                                    <Badge className="ml-auto shrink-0 bg-indigo-100 text-indigo-700">
-                                        {request.leave_type_name}
-                                    </Badge>
-                                </li>
-                            );
-                        })}
-                    </ul>
-                ) : (
-                    <p className="mt-2 text-sm text-slate-500">Nobody's out today.</p>
-                )}
+                <OnLeaveTodayTable
+                    requests={onLeaveToday}
+                    emptyMessage={isSuperAdmin ? "Nobody in the organisation is out today." : "Nobody's out today."}
+                />
             </div>
         </Card>
     );
