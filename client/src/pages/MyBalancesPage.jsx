@@ -1,17 +1,15 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { getMyBalances } from "../services/leaveBalanceService.js";
 import { getMyLeaveRequests } from "../services/leaveRequestService.js";
 import { getHolidays } from "../services/holidayService.js";
 import { Button } from "../components/ui/Button.jsx";
 import { Card } from "../components/ui/Card.jsx";
-import { Modal } from "../components/ui/Modal.jsx";
-import { RequestLeaveForm } from "../components/leave/RequestLeaveForm.jsx";
 import { MyLeaveRequestList } from "../components/leave/MyLeaveRequestList.jsx";
 import { MyLeaveCalendar } from "../components/leave/MyLeaveCalendar.jsx";
 import { LeaveBalanceCard } from "../components/leave/LeaveBalanceCard.jsx";
-import { LEAVE_BALANCE_ACCENTS } from "../constants/leaveBalanceAccents.js";
+import { buildLeaveTypeAccents, accentFor } from "../utils/leaveTypeAccents.js";
 
 const currentYear = new Date().getFullYear();
 // A short window around today is enough — there's no leave history before this
@@ -55,11 +53,12 @@ export function MyBalancesPage() {
     // row can be highlighted and scrolled into view in the list beside it —
     // also seeded from a notification click so that row starts highlighted too.
     const [selectedRequestId, setSelectedRequestId] = useState(notificationRequestId);
-    // Set right after submitting a new request so the calendar can jump to
-    // it — the calendar itself owns month-to-month navigation otherwise.
-    const [focusDate, setFocusDate] = useState(initialFocusDate);
+    // Seeded from the router state ApplyLeavePage navigates back with, so
+    // the calendar opens on the month of the request just submitted. Read-only
+    // from here on: this page no longer submits anything itself, so nothing
+    // ever needs to move the focus after mount.
+    const [focusDate] = useState(initialFocusDate);
 
-    const [showRequestForm, setShowRequestForm] = useState(false);
     // Beyond a handful of leave types, a full card grid pushes everything
     // else on the page below the fold — collapsed to the first 6 by default,
     // with a toggle to reveal the rest.
@@ -71,6 +70,7 @@ export function MyBalancesPage() {
     const [reloadToken, setReloadToken] = useState(0);
     const reload = () => setReloadToken((token) => token + 1);
 
+    const leaveTypeAccents = buildLeaveTypeAccents(balances);
     const loading = loadedYear !== year;
     const holidaysLoading = loadedHolidayYear !== calendarYear;
 
@@ -138,16 +138,6 @@ export function MyBalancesPage() {
         };
     }, [calendarYear, reloadToken]);
 
-    function handleSubmitted(created) {
-        setShowRequestForm(false);
-        setFocusDate(created.start_date);
-        const createdYear = Number(created.start_date.slice(0, 4));
-        if (createdYear !== calendarYear) {
-            setCalendarYear(createdYear);
-        }
-        reload();
-    }
-
     return (
         <div>
             <div className="flex flex-wrap items-center justify-between gap-3">
@@ -170,7 +160,14 @@ export function MyBalancesPage() {
                             ))}
                         </select>
                     </div>
-                    <Button icon={Plus} onClick={() => setShowRequestForm(true)}>
+                    {/* Navigates to the Apply Leave page rather than
+                        opening a modal (direct request — the modal is gone).
+                        That page posts the request and comes back here with
+                        the new start date in router state, which this page's
+                        own `initialFocusDate` picks up on the fresh mount, so
+                        the calendar still jumps to it without this page
+                        needing a submit handler at all. */}
+                    <Button as={Link} to="/dashboard/my-leave/apply-leave" icon={Plus}>
                         Request Leave
                     </Button>
                 </div>
@@ -179,10 +176,6 @@ export function MyBalancesPage() {
             <p className="mt-1 text-sm text-slate-500">
                 Your leave balance for each leave type. Days remaining is entitlement minus days taken and pending.
             </p>
-
-            <Modal open={showRequestForm} onClose={() => setShowRequestForm(false)} title="Request leave">
-                <RequestLeaveForm onSubmitted={handleSubmitted} />
-            </Modal>
 
             {loading && (
                 <p role="status" className="mt-6 text-sm text-slate-500">
@@ -204,11 +197,17 @@ export function MyBalancesPage() {
             {!loading && !loadError && balances.length > 0 && (
                 <div className="mt-6">
                     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                        {(showAllBalances ? balances : balances.slice(0, 6)).map((balance, index) => (
+                        {/* Accent comes from the shared per-leave-type map
+                            rather than this list's own index — same colours as
+                            before (the map is built from this array in this
+                            order), but now the dashboard's My leave tile tints
+                            a type identically instead of the two agreeing by
+                            coincidence. */}
+                        {(showAllBalances ? balances : balances.slice(0, 6)).map((balance) => (
                             <LeaveBalanceCard
                                 key={balance.id}
                                 balance={balance}
-                                accent={LEAVE_BALANCE_ACCENTS[index % LEAVE_BALANCE_ACCENTS.length]}
+                                accent={accentFor(leaveTypeAccents, balance.leave_type_id)}
                             />
                         ))}
                     </div>
