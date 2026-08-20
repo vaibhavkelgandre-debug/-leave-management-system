@@ -17,17 +17,13 @@ function renderNav(role) {
     });
 }
 
-function makeRequest(status) {
-    return { id: `req-${Math.random()}`, status };
-}
-
 describe("NavBar", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         // Default: nobody has delegated to the rendered user, and no pending
         // requests — most tests below aren't about either.
         delegationService.getDelegationsAsDelegate.mockResolvedValue([]);
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
+        leaveRequestService.getPendingApprovalsCount.mockResolvedValue(0);
     });
 
     it("shows the shared links but no team or HR links for an EMPLOYEE", async () => {
@@ -85,46 +81,58 @@ describe("NavBar", () => {
         expect(screen.queryByText("Manager")).not.toBeInTheDocument();
     });
 
-    it("shows all links for HR_ADMIN", () => {
+    it("shows the HR links for HR_ADMIN, but not the company-wide roster", () => {
         renderNav(ROLES.HR_ADMIN);
         expect(screen.getByRole("link", { name: /dashboard/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /my leave/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /my team/i })).toBeInTheDocument();
-        expect(screen.getByRole("link", { name: /all employees/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /leave types/i })).toBeInTheDocument();
         expect(screen.getByRole("link", { name: /leave calendar/i })).toBeInTheDocument();
+        // All Employees is SUPER_ADMIN's alone — an HR admin's view of people
+        // is their own branch, via My Team.
+        expect(screen.queryByRole("link", { name: /all employees/i })).not.toBeInTheDocument();
     });
 
-    it("always shows Apply Leave regardless of role", () => {
-        renderNav(ROLES.EMPLOYEE);
-        expect(screen.getByRole("link", { name: /apply leave/i })).toBeInTheDocument();
+    it("shows All Employees only to SUPER_ADMIN", () => {
+        renderNav(ROLES.SUPER_ADMIN);
+        expect(screen.getByRole("link", { name: /all employees/i })).toBeInTheDocument();
     });
 
-    it("highlights only My Leave, not Apply Leave, on the My Leave route — they're separate pages now, not a shared path with a query flag", () => {
+    // Applying for leave is reached from My Leave's own "Request Leave"
+    // button now (/dashboard/my-leave/apply-leave), not a sidebar entry.
+    it("has no Apply Leave link for any role", () => {
+        for (const role of [ROLES.EMPLOYEE, ROLES.MANAGER, ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]) {
+            const { unmount } = renderNav(role);
+            expect(screen.queryByRole("link", { name: /apply leave/i })).not.toBeInTheDocument();
+            unmount();
+        }
+    });
+
+    it("highlights My Leave on its own route", () => {
         renderWithProviders(<NavBar />, {
             route: "/dashboard/my-leave",
             authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
         });
 
         expect(screen.getByRole("link", { name: /^my leave$/i }).className).toContain("bg-indigo-50");
-        expect(screen.getByRole("link", { name: /apply leave/i }).className).not.toContain("bg-indigo-50");
     });
 
-    it("highlights only Apply Leave, not My Leave, on the Apply Leave route", () => {
+    // The nested apply route is a child of My Leave, so the parent link stays
+    // highlighted while you're on it — there's no separate entry to light up.
+    it("keeps My Leave highlighted on the nested apply-leave route", () => {
         renderWithProviders(<NavBar />, {
-            route: "/dashboard/apply-leave",
+            route: "/dashboard/my-leave/apply-leave",
             authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
         });
 
-        expect(screen.getByRole("link", { name: /apply leave/i }).className).toContain("bg-indigo-50");
-        expect(screen.getByRole("link", { name: /^my leave$/i }).className).not.toContain("bg-indigo-50");
+        expect(screen.getByRole("link", { name: /^my leave$/i }).className).toContain("bg-indigo-50");
     });
 
     describe("hover tooltip", () => {
         it("shows nothing on hover when the sidebar is expanded — the label is already visible as text", async () => {
             renderNav(ROLES.EMPLOYEE);
 
-            await userEvent.hover(screen.getByRole("link", { name: /apply leave/i }));
+            await userEvent.hover(screen.getByRole("link", { name: /leave calendar/i }));
 
             expect(screen.queryByRole("tooltip")).not.toBeInTheDocument();
         });
@@ -134,37 +142,36 @@ describe("NavBar", () => {
                 authValue: makeAuthValue({ user: { id: "1", role: ROLES.EMPLOYEE } }),
             });
 
-            await userEvent.hover(screen.getByRole("link", { name: /apply leave/i }));
+            await userEvent.hover(screen.getByRole("link", { name: /leave calendar/i }));
 
             const tooltip = await screen.findByRole("tooltip");
-            expect(tooltip).toHaveTextContent("Apply Leave");
-            expect(tooltip).not.toHaveTextContent(/submit a new leave request/i);
+            expect(tooltip).toHaveTextContent("Leave Calendar");
+            expect(tooltip).not.toHaveTextContent(/public holidays/i);
         });
     });
 
     describe("pending-approvals badge", () => {
+        // The count comes from GET /leave-requests/pending-count now, not from
+        // filtering a downloaded team list — so these tests mock a number, and
+        // "which requests count as pending" is asserted server-side
+        // (leaveRequests.test.js) instead of being duplicated here.
         it("shows no badge on Approvals when there's nothing pending", async () => {
             renderNav(ROLES.MANAGER);
-            await waitFor(() => expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalled());
+            await waitFor(() => expect(leaveRequestService.getPendingApprovalsCount).toHaveBeenCalled());
             expect(screen.queryByLabelText(/pending/i)).not.toBeInTheDocument();
         });
 
-        it("counts only SUBMITTED requests, not decided ones, for a MANAGER", async () => {
-            leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
-                makeRequest("SUBMITTED"),
-                makeRequest("SUBMITTED"),
-                makeRequest("APPROVED"),
-                makeRequest("REJECTED"),
-            ]);
+        it("badges Approvals with the server's count", async () => {
+            leaveRequestService.getPendingApprovalsCount.mockResolvedValue(2);
             renderNav(ROLES.MANAGER);
 
             expect(await screen.findByLabelText("2 pending")).toBeInTheDocument();
         });
 
-        it("never fetches the team list for a plain EMPLOYEE with no active delegation", async () => {
+        it("never asks for a count for a plain EMPLOYEE with no active delegation", async () => {
             renderNav(ROLES.EMPLOYEE);
             await waitFor(() => expect(delegationService.getDelegationsAsDelegate).toHaveBeenCalled());
-            expect(leaveRequestService.getTeamLeaveRequests).not.toHaveBeenCalled();
+            expect(leaveRequestService.getPendingApprovalsCount).not.toHaveBeenCalled();
         });
 
         it("shows the badge for a delegate-employee once their active delegation reveals Approvals", async () => {
@@ -178,7 +185,7 @@ describe("NavBar", () => {
                     end_date: addDaysToDateKey(today, 1),
                 },
             ]);
-            leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest("SUBMITTED")]);
+            leaveRequestService.getPendingApprovalsCount.mockResolvedValue(1);
             renderNav(ROLES.EMPLOYEE);
 
             expect(await screen.findByLabelText("1 pending")).toBeInTheDocument();

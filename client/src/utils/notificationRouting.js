@@ -24,6 +24,12 @@ export function getNotificationRoute({ type, entity_id: entityId }) {
         case "MANAGER_REASSIGNED":
         case "SALARY_STRUCTURE_UPDATED":
         case "ACCOUNT_STATUS_CHANGED":
+        case "PROFILE_CREATED":
+            // PROFILE_CREATED: the new employee themself, right after
+            // accepting their invite — lands on their own profile page,
+            // same as every other self-facing profile-lifecycle
+            // notification, so they can pick up exactly where this
+            // notification tells them to.
             return { pathname: "/dashboard/profile", state: null };
         case "SALARY_SLIP_GENERATED":
         case "SALARY_SLIP_VOIDED":
@@ -44,11 +50,13 @@ export function getNotificationRoute({ type, entity_id: entityId }) {
         case "DELEGATION_STARTED":
         case "DELEGATION_ENDED":
             return { pathname: "/dashboard/delegations", state: null };
-        // The recipient is always the inviting HR admin; All Employees is
-        // company-wide and read-only (no per-row drill-in), so this just
-        // lands there rather than a specific row.
+        // The recipient is always the inviting HR admin, so this lands on My
+        // Team — where the person who just accepted now appears, and where
+        // that admin's own per-person controls live. Deliberately not All
+        // Employees any more: that page is SUPER_ADMIN-only, so an HR admin
+        // clicking this notification would have been bounced to /403.
         case "INVITE_ACCEPTED":
-            return { pathname: "/dashboard/employees", state: null };
+            return { pathname: "/dashboard/team", state: null };
         default:
             return { pathname: "/dashboard/notifications", state: null };
     }

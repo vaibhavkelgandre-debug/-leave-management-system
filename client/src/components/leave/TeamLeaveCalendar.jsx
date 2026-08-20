@@ -10,7 +10,7 @@
 import { useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
-import { eachDateKeyInRange, formatDateRange } from "../../utils/dates.js";
+import { eachDateKeyInRange, formatDateRange, toDateKey } from "../../utils/dates.js";
 import { useHoverTooltip } from "../../hooks/useHoverTooltip.js";
 import { FloatingTooltip } from "../ui/Tooltip.jsx";
 
@@ -49,9 +49,9 @@ const FC_COMPACT_CLASSES = [
     "[&_.fc-daygrid-event-dot]:!border-[4px]",
 ].join(" ");
 
-export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, selectedRequestId, onSelectRequest }) {
+export function TeamLeaveCalendar({ requests, holidays, onActiveRangeChange, selectedRequestId, onSelectRequest }) {
     const calendarRef = useRef(null);
-    const lastNotifiedYear = useRef(null);
+    const lastNotifiedRange = useRef(null);
     const tooltip = useHoverTooltip();
 
     // Only SUBMITTED/APPROVED requests occupy a day — a
@@ -97,14 +97,25 @@ export function TeamLeaveCalendar({ requests, holidays, onActiveYearChange, sele
         }))
     );
 
+    // Reports the whole visible grid, not just its year: the page fetches this
+    // calendar's requests by window now (the team list is paginated, so the
+    // list's page 1 is not "everything in this month"), and holidays still
+    // want the year. `activeStart`/`activeEnd` are the grid's real bounds
+    // including days spilling in from the neighbouring months — `currentStart`
+    // would miss events on those cells. `activeEnd` is exclusive, hence -1.
+    //
+    // Guarded against re-notifying the same range: FullCalendar fires
+    // `datesSet` on any re-render, and each call here triggers a fetch.
     function handleDatesSet(info) {
-        // `currentStart` is the first date belonging to the visible month
-        // (not the first cell of the grid, which may spill into the prior
-        // month).
-        const year = info.view.currentStart.getFullYear();
-        if (year !== lastNotifiedYear.current) {
-            lastNotifiedYear.current = year;
-            onActiveYearChange?.(year);
+        const { activeStart, activeEnd, currentStart } = info.view;
+        const startDate = toDateKey(activeStart.getFullYear(), activeStart.getMonth(), activeStart.getDate());
+        const endExclusive = new Date(activeEnd.getFullYear(), activeEnd.getMonth(), activeEnd.getDate() - 1);
+        const endDate = toDateKey(endExclusive.getFullYear(), endExclusive.getMonth(), endExclusive.getDate());
+        const key = `${startDate}|${endDate}`;
+
+        if (key !== lastNotifiedRange.current) {
+            lastNotifiedRange.current = key;
+            onActiveRangeChange?.({ year: currentStart.getFullYear(), startDate, endDate });
         }
     }
 

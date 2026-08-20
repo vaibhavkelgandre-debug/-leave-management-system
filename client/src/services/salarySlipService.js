@@ -27,11 +27,11 @@ export async function getMySalarySlips({ payPeriod } = {}) {
     return unwrap(response);
 }
 
-export async function getSalarySlipsForHr({ employeeId, payPeriod, role } = {}) {
-    const params = {};
-    if (employeeId) params.employeeId = employeeId;
-    if (payPeriod) params.payPeriod = payPeriod;
-    if (role) params.role = role;
+// Paginated `{ slips, total }` — this list spans every payroll month ever
+// run (200 employees x 36 months at NFR-7's target), so callers pass
+// `limit`/`offset` alongside the filters. Same contract as the leave-request
+// lists. `getMySalarySlips` stays unpaginated: that's one person's own ~36 rows.
+export async function getSalarySlipsForHr(params = {}) {
     const response = await apiClient.get("/salary-slips", { params });
     return unwrap(response);
 }

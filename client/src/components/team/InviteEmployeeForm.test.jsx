@@ -21,7 +21,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("asks who each role reports to — including an HR admin, who now reports to whoever created them", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
             makeUser({ role: ROLES.MANAGER }),
         ]);
@@ -44,7 +44,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("offers the super admin alongside other HR admins as who a new HR admin can report to", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
             makeUser({ id: "super-1", first_name: "Sam", role: ROLES.SUPER_ADMIN }),
             makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
@@ -67,7 +67,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("defaults the HR admin reporting-line picker to the inviter themself, labeled \"You\"", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
             makeUser({ id: "hr-2", first_name: "Amit", role: ROLES.HR_ADMIN }),
             makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
@@ -86,7 +86,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("submits an HR admin invite with the picked HR admin as managerId", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN }),
             makeUser({ id: "hr-2", first_name: "Amit", role: ROLES.HR_ADMIN }),
         ]);
@@ -111,7 +111,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("offers only HR admins as the reporting line for a new manager", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-1", first_name: "Hema", role: ROLES.HR_ADMIN }),
             makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
             makeUser({ id: "emp-1", first_name: "Asha", role: ROLES.EMPLOYEE }),
@@ -132,7 +132,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("clears an already-picked person when the role changes", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             makeUser({ id: "hr-1", first_name: "Hema", role: ROLES.HR_ADMIN }),
             makeUser({ id: "mgr-1", first_name: "Manoj", role: ROLES.MANAGER }),
         ]);
@@ -148,7 +148,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("submits a manager with the HR admin they report to", async () => {
-        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-1", first_name: "Hema", role: ROLES.HR_ADMIN })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "hr-1", first_name: "Hema", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-2" }),
             inviteLink: "http://localhost:5173/invite/mgr-link",
@@ -171,7 +171,7 @@ describe("InviteEmployeeForm", () => {
 
     it("submits the invite, shows the returned invite link, and notifies the caller", async () => {
         const manager = makeUser({ id: "mgr-1", role: ROLES.MANAGER });
-        userService.getUsers.mockResolvedValue([manager]);
+        userService.getUserOptions.mockResolvedValue([manager]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-1" }),
             inviteLink: "http://localhost:5173/invite/abc123",
@@ -204,7 +204,7 @@ describe("InviteEmployeeForm", () => {
     // test above already exercises (its mock omits the flag, as an older
     // server or a failed send would).
     it("confirms the invite was emailed, keeping the link as a fallback", async () => {
-        userService.getUsers.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-1", email: "new@example.com" }),
             inviteLink: "http://localhost:5173/invite/abc123",
@@ -226,7 +226,7 @@ describe("InviteEmployeeForm", () => {
     });
 
     it("warns when the server couldn't build an invite link at all", async () => {
-        userService.getUsers.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-1" }),
             inviteLink: null,
@@ -250,7 +250,7 @@ describe("InviteEmployeeForm", () => {
         // Includes the inviter's own HR record — findAllUsers() always would
         // in real data, and the HR-admin reporting-line picker defaults to
         // selecting the inviter themself, which needs a matching option.
-        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockResolvedValue({
             user: makeUser({ id: "new-1" }),
             inviteLink: "http://localhost:5173/invite/abc123",
@@ -278,7 +278,7 @@ describe("InviteEmployeeForm", () => {
         // Includes the inviter's own HR record — findAllUsers() always would
         // in real data, and the HR-admin reporting-line picker defaults to
         // selecting the inviter themself, which needs a matching option.
-        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         renderForm();
         await screen.findByLabelText(/first name/i);
 
@@ -297,7 +297,7 @@ describe("InviteEmployeeForm", () => {
         // Includes the inviter's own HR record — findAllUsers() always would
         // in real data, and the HR-admin reporting-line picker defaults to
         // selecting the inviter themself, which needs a matching option.
-        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockRejectedValue({
             response: {
                 status: 422,
@@ -326,7 +326,7 @@ describe("InviteEmployeeForm", () => {
         // Includes the inviter's own HR record — findAllUsers() always would
         // in real data, and the HR-admin reporting-line picker defaults to
         // selecting the inviter themself, which needs a matching option.
-        userService.getUsers.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
+        userService.getUserOptions.mockResolvedValue([makeUser({ id: "hr-viewer", role: ROLES.HR_ADMIN })]);
         userService.inviteEmployee.mockRejectedValue({
             response: { data: { message: "Email already in use" } },
         });

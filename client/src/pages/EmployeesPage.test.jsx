@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { renderWithProviders, makeAuthValue } from "../tests/renderWithProviders.jsx";
 import { EmployeesPage } from "./EmployeesPage.jsx";
 import * as userService from "../services/userService.js";
@@ -31,18 +30,16 @@ describe("EmployeesPage", () => {
         expect(await screen.findByRole("alert")).toHaveTextContent("Unable to load employees");
     });
 
-    it("opens the invite form in a modal instead of navigating away", async () => {
+    it("links Add Employee to its own page instead of opening a modal", async () => {
         userService.getUsers.mockResolvedValue([]);
         renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
         await screen.findByText("Leadership");
 
-        // Closed by default — nothing from the invite form renders yet.
-        expect(screen.queryByLabelText(/first name/i)).not.toBeInTheDocument();
-
-        await userEvent.click(screen.getByRole("button", { name: /add employee/i }));
-
-        expect(await screen.findByRole("dialog", { name: /invite an employee/i })).toBeInTheDocument();
-        expect(screen.getByLabelText(/first name/i)).toBeInTheDocument();
+        expect(screen.getByRole("link", { name: /add employee/i })).toHaveAttribute(
+            "href",
+            "/dashboard/employees/new"
+        );
+        expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
     });
 
     it("never shows change-manager or activate/deactivate controls — those live on My Team instead", async () => {
@@ -70,8 +67,13 @@ describe("EmployeesPage", () => {
         userService.getUsers.mockResolvedValue([self, other]);
 
         renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
-        const priyaRow = (await screen.findByText("Priya User")).closest("li");
-        const zaraRow = (await screen.findByText("Zara User")).closest("li");
+        // Priya's own name also appears a second time, as the value of
+        // Zara's "Reports To" column — scope each lookup to its own section
+        // so that doesn't create an ambiguous match.
+        const leadershipSection = (await screen.findByText("Leadership")).closest("section");
+        const priyaRow = within(leadershipSection).getByText("Priya User").closest("tr");
+        const unassignedSection = screen.getByText("Reports directly to HR").closest("section");
+        const zaraRow = within(unassignedSection).getByText("Zara User").closest("tr");
 
         expect(within(priyaRow).getByText("You")).toBeInTheDocument();
         expect(within(zaraRow).queryByText("You")).not.toBeInTheDocument();
@@ -85,12 +87,12 @@ describe("EmployeesPage", () => {
             userService.getUsers.mockResolvedValue([hr, manager, employee]);
 
             renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
-            const zaraRow = (await screen.findByText("Zara User")).closest("li");
+            const zaraRow = (await screen.findByText("Zara User")).closest("tr");
 
-            // The card containing Zara's row also contains Amit's row —
-            // that's what makes it "Amit's team card" rather than some
+            // The table containing Zara's row also contains Amit's row —
+            // that's what makes it "Amit's team table" rather than some
             // other grouping.
-            expect(within(zaraRow.closest("ul")).getByText("Amit User")).toBeInTheDocument();
+            expect(within(zaraRow.closest("table")).getByText("Amit User")).toBeInTheDocument();
             expect(screen.queryByText("Reports directly to HR")).not.toBeInTheDocument();
         });
 
@@ -102,8 +104,10 @@ describe("EmployeesPage", () => {
             renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
 
             expect(await screen.findByText("Reports directly to HR")).toBeInTheDocument();
-            expect(screen.getByText("Zara User")).toBeInTheDocument();
-            expect(screen.getByText(/reports to priya user/i)).toBeInTheDocument();
+            const zaraRow = screen.getByText("Zara User").closest("tr");
+            // The "Reports To" column value, not a "Reports to X" sentence —
+            // the column header already says what this cell means.
+            expect(within(zaraRow).getByText("Priya User")).toBeInTheDocument();
         });
 
         it("doesn't show the \"Reports directly to HR\" section when nobody is in it", async () => {

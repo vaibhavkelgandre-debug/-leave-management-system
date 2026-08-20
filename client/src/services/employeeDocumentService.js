@@ -43,8 +43,8 @@ export async function deleteMyCustomDocument(documentId) {
     return unwrap(response);
 }
 
-// Returns `{ url, filename, mimeType }` for one of the caller's own
-// documents — used by ProfileDocumentUpload.jsx's "View" action.
+// Returns `{ documentId, url, filename, mimeType }` for one of the caller's
+// own documents — used by ProfileDocumentUpload.jsx's "View" action.
 export async function getMyDocumentUrl(documentType) {
     const response = await apiClient.get(`/employees/me/documents/${documentType}/url`);
     return unwrap(response);
@@ -55,11 +55,26 @@ export async function getDocumentsForEmployee(employeeId) {
     return unwrap(response);
 }
 
-// Returns `{ url, filename, mimeType }` — `url` is a short-lived Cloudinary
-// signed link, same shape as leaveRequestService.getLeaveRequestDocument.
+// Returns `{ documentId, url, filename, mimeType }` — `url` is a short-lived
+// Cloudinary signed link, same shape as
+// leaveRequestService.getLeaveRequestDocument.
 export async function getDocumentUrl(employeeId, documentType) {
     const response = await apiClient.get(`/employees/${employeeId}/documents/${documentType}/url`);
     return unwrap(response);
+}
+
+// The document's bytes served by *this* app rather than Cloudinary, which is
+// the only way a PDF can be previewed: PDFs are stored as Cloudinary `raw`
+// assets and raw delivery forces a download, so an <iframe> pointed at the
+// signed URL saved the file instead of rendering it. Same shape and reasoning
+// as salarySlipService.getSalarySlipPdfUrl — a plain URL string, not a fetch,
+// since it's consumed as an `src`/`href` and authorized by the session cookie.
+//
+// Defaults to `inline` (the endpoint does too); pass `{ inline: false }` for
+// a real save-to-disk.
+export function getDocumentFileUrl(documentId, { inline = true } = {}) {
+    const query = inline ? "" : "?disposition=attachment";
+    return `${apiClient.defaults.baseURL}/employees/documents/${documentId}/file${query}`;
 }
 
 export async function reviewDocument(employeeId, documentType, { status, comment }) {

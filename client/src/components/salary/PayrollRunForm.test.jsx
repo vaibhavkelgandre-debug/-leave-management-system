@@ -15,7 +15,7 @@ const previewResponse = {
             employeeName: "Asha Employee",
             status: "ok",
             skipReason: null,
-            computed: { lopDays: 0, netPay: 45200 },
+            computed: { lopDays: 0, totalLeaveDays: 0, payableDays: 31, netPay: 45200 },
         },
         {
             employeeId: "u2",
@@ -53,6 +53,37 @@ describe("PayrollRunForm", () => {
         expect(await screen.findByText("Asha Employee")).toBeInTheDocument();
         expect(screen.getByText("No salary structure assigned")).toBeInTheDocument();
         expect(screen.getByRole("button", { name: /approve and generate 1 payslip/i })).toBeInTheDocument();
+    });
+
+    // Three row states now, not two: an employee who already holds a payslip
+    // for the period is a normal outcome of re-running it, badged distinctly
+    // from a genuine problem (no structure, unverified profile, nothing
+    // payable) so a finished month doesn't read as a broken run.
+    it("badges an already-paid employee separately from a skipped one, and says so in the summary", async () => {
+        salarySlipService.calculatePayroll.mockResolvedValue({
+            summary: { total: 3, ok: 1, skipped: 1, alreadyGenerated: 1 },
+            rows: [
+                ...previewResponse.rows,
+                {
+                    employeeId: "u3",
+                    employeeName: "Meera Paid",
+                    status: "already_generated",
+                    skipReason: "Already received a payslip for this period — void the existing slip first to re-run",
+                    computed: null,
+                },
+            ],
+        });
+        renderWithProviders(<PayrollRunForm onSaved={vi.fn()} />);
+
+        await calculate();
+
+        expect(await screen.findByText("Already received")).toBeInTheDocument();
+        // The row explains what to do about it; the summary line explains why
+        // "1 of 3 payroll-ready" isn't a failure.
+        expect(screen.getByText(/void the existing slip first/i)).toBeInTheDocument();
+        expect(screen.getByText(/1 already received a payslip for this period\./i)).toBeInTheDocument();
+        // Only the real problem row gets the amber "Skipped" badge.
+        expect(screen.getAllByText("Skipped")).toHaveLength(1);
     });
 
     it("sends the chosen role and profile-status filters when calculating", async () => {

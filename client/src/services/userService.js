@@ -5,9 +5,26 @@ export async function getUsers() {
     return unwrap(response);
 }
 
+// Picker-sized user list: id, name, role, status — nothing else. Use this for
+// any dropdown; `getUsers()` returns every profile field of every user (~40
+// columns each) and is only right for the All Employees roster, which
+// actually displays them.
+export async function getUserOptions() {
+    const response = await apiClient.get("/users/options");
+    return unwrap(response);
+}
+
 export async function getMyTeam() {
     const response = await apiClient.get("/users/me/team");
     return unwrap(response);
+}
+
+// Count-only sibling of getMyTeam, for the dashboard's headcount chip: that
+// tile reads a single number, and getMyTeam returns every subtree row with all
+// ~40 public columns.
+export async function getMyTeamSize() {
+    const response = await apiClient.get("/users/me/team/count");
+    return unwrap(response).count;
 }
 
 export async function inviteEmployee({ firstName, lastName, email, role, managerId }) {

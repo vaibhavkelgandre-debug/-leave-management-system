@@ -1,10 +1,17 @@
-// Dedicated destination for the sidebar's "Apply Leave" link. This used to
-// be a query-param trick (/dashboard/my-leave?apply=1) that opened a modal
-// on top of MyBalancesPage — which silently did nothing when clicked while
-// already on that page, since a search-only navigation doesn't remount the
-// component, so the lazy-initialized state that read the query param never
-// re-ran. A real, separate route always mounts fresh on navigation, so the
-// link always does something regardless of where it was clicked from.
+// The one place a leave request is submitted from, at
+// /dashboard/my-leave/apply-leave — reached from My Leave's "Request Leave"
+// button, which is now the only entry point (the sidebar link was removed on
+// direct request, since applying is something you do *from* your own leave
+// page rather than a destination of its own).
+//
+// Still a real route rather than a modal, and that history is worth keeping:
+// this began as a query-param trick (/dashboard/my-leave?apply=1) that opened
+// a modal over MyBalancesPage, which silently did nothing when clicked while
+// already on that page — a search-only navigation doesn't remount the
+// component, so the lazy-initialized state reading the query param never
+// re-ran. A nested route always mounts fresh. The modal version was removed
+// outright in the same pass that moved this under my-leave; don't reintroduce
+// one.
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getMyBalances } from "../services/leaveBalanceService.js";

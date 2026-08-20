@@ -18,7 +18,7 @@ function renderForm(props = {}) {
 describe("DelegationForm", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             { id: "mgr-1", first_name: "Priya", last_name: "Self" },
             { id: "mgr-2", first_name: "Rohit", last_name: "Peer" },
         ]);

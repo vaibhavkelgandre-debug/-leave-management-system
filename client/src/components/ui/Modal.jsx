@@ -37,7 +37,7 @@ export function Modal({ open, onClose, title, size = "md", children }) {
     if (!open) return null;
 
     return createPortal(
-        <div className="fixed inset-0 z-50 overflow-y-auto">
+        <div className="scrollbar-thin fixed inset-0 z-50 overflow-y-auto">
             <div
                 className="fixed inset-0 animate-[fade-in_150ms_ease-out] bg-slate-900/50 backdrop-blur-sm"
                 aria-hidden="true"
@@ -58,7 +58,7 @@ export function Modal({ open, onClose, title, size = "md", children }) {
                         </h2>
                         <IconButton icon={X} label="Close" onClick={onClose} />
                     </div>
-                    <div className="mt-4 overflow-y-auto px-6 pb-6">{children}</div>
+                    <div className="scrollbar-thin mt-4 overflow-y-auto px-6 pb-6">{children}</div>
                 </div>
             </div>
         </div>,

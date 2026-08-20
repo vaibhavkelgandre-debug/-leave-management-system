@@ -18,6 +18,17 @@ function money(value) {
     return Number(value).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+// The most recent fully-completed month, as a "YYYY-MM" string — used as the
+// month picker's `max` so it doesn't invite a choice the server will reject
+// anyway (a pay period can only be generated once it has fully ended; see
+// assertPeriodCompleted in salarySlipService.js). This is a UX nicety only —
+// the server remains the source of truth for the actual rule.
+function lastCompletedPayPeriod() {
+    const now = new Date();
+    const lastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    return `${lastMonth.getFullYear()}-${String(lastMonth.getMonth() + 1).padStart(2, "0")}`;
+}
+
 const selectClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
 
@@ -110,17 +121,26 @@ export function PayrollRunForm({ onSaved }) {
                     </p>
                 )}
 
+                {/* The already-received count is called out here, not just
+                    per row: re-running a period that's already been paid is
+                    the common case for landing on "0 of 12 payroll-ready",
+                    and without this line that reads as a failure rather than
+                    as "this month is already done". */}
                 <p className="text-sm text-slate-600">
                     {preview.summary.ok} of {preview.summary.total} employee{preview.summary.total === 1 ? "" : "s"}{" "}
                     payroll-ready for <span className="font-medium">{payPeriod}</span>.
+                    {preview.summary.alreadyGenerated > 0 &&
+                        ` ${preview.summary.alreadyGenerated} already received a payslip for this period.`}
                 </p>
 
-                <div className="max-h-80 overflow-y-auto rounded-lg border border-slate-200">
+                <div className="scrollbar-thin max-h-80 overflow-y-auto rounded-lg border border-slate-200">
                     <table className="min-w-full divide-y divide-slate-100 text-sm">
                         <thead className="bg-slate-50 text-left text-xs font-medium text-slate-500">
                             <tr>
                                 <th className="px-3 py-2">Employee</th>
+                                <th className="px-3 py-2">Payable days</th>
                                 <th className="px-3 py-2">LOP days</th>
+                                <th className="px-3 py-2">Total leave</th>
                                 <th className="px-3 py-2">Net pay</th>
                                 <th className="px-3 py-2">Status</th>
                             </tr>
@@ -129,18 +149,36 @@ export function PayrollRunForm({ onSaved }) {
                             {preview.rows.map((row) => (
                                 <tr key={row.employeeId}>
                                     <td className="px-3 py-2 text-slate-700">{row.employeeName}</td>
+                                    <td className="px-3 py-2 text-slate-700">
+                                        {row.computed ? row.computed.payableDays : "—"}
+                                    </td>
                                     <td className="px-3 py-2 text-slate-700">{row.computed ? row.computed.lopDays : "—"}</td>
+                                    <td className="px-3 py-2 text-slate-700">
+                                        {row.computed ? row.computed.totalLeaveDays : "—"}
+                                    </td>
                                     <td className="px-3 py-2 text-slate-700">
                                         {row.computed ? money(row.computed.netPay) : "—"}
                                     </td>
+                                    {/* Three states, not two: "already
+                                        received" is a normal, expected
+                                        outcome of re-running a period that's
+                                        already been paid, so badging it
+                                        amber alongside genuine problems
+                                        (no salary structure, unverified
+                                        profile, nothing payable) made a
+                                        finished payroll look broken. */}
                                     <td className="px-3 py-2">
-                                        {row.status === "ok" ? (
+                                        {row.status === "ok" && (
                                             <Badge className="bg-green-100 text-green-700">Ready</Badge>
-                                        ) : (
-                                            <>
-                                                <Badge className="bg-amber-100 text-amber-700">Skipped</Badge>
-                                                <p className="mt-0.5 text-xs text-slate-500">{row.skipReason}</p>
-                                            </>
+                                        )}
+                                        {row.status === "already_generated" && (
+                                            <Badge className="bg-slate-100 text-slate-600">Already received</Badge>
+                                        )}
+                                        {row.status === "skipped" && (
+                                            <Badge className="bg-amber-100 text-amber-700">Skipped</Badge>
+                                        )}
+                                        {row.status !== "ok" && (
+                                            <p className="mt-0.5 text-xs text-slate-500">{row.skipReason}</p>
                                         )}
                                     </td>
                                 </tr>
@@ -182,13 +220,14 @@ export function PayrollRunForm({ onSaved }) {
                     id="payPeriod"
                     type="month"
                     required
+                    max={lastCompletedPayPeriod()}
                     value={payPeriod}
                     onChange={(event) => setPayPeriod(event.target.value)}
                     className="block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
                 />
                 <p className="mt-1 text-xs text-slate-500">
-                    Pulls each payroll-ready employee's salary structure and approved leave for the period — nothing to
-                    upload.
+                    Only a fully completed past month can be run — pulls each payroll-ready employee's salary structure
+                    and approved leave for the period, nothing to upload.
                 </p>
             </div>
 

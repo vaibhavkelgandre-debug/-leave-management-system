@@ -64,6 +64,13 @@ describe("getNotificationRoute", () => {
         });
     });
 
+    it("sends a newly-created profile (right after accepting an invite) to the employee's own profile page", () => {
+        expect(getNotificationRoute({ type: "PROFILE_CREATED", entity_id: "emp-1" })).toEqual({
+            pathname: "/dashboard/profile",
+            state: null,
+        });
+    });
+
     it("sends a new team member assignment to My Team", () => {
         expect(getNotificationRoute({ type: "TEAM_MEMBER_ASSIGNED", entity_id: "emp-1" })).toEqual({
             pathname: "/dashboard/team",
@@ -89,9 +96,9 @@ describe("getNotificationRoute", () => {
         });
     });
 
-    it("sends an accepted invite to All Employees", () => {
+    it("sends an accepted invite to My Team — All Employees is SUPER_ADMIN-only now", () => {
         expect(getNotificationRoute({ type: "INVITE_ACCEPTED", entity_id: "emp-1" })).toEqual({
-            pathname: "/dashboard/employees",
+            pathname: "/dashboard/team",
             state: null,
         });
     });

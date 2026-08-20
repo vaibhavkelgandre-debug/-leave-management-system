@@ -1,7 +1,6 @@
 import { NavLink, useLocation } from "react-router-dom";
 import {
     CalendarCheck,
-    CalendarPlus,
     ClipboardCheck,
     FileBarChart,
     IdCard,
@@ -39,13 +38,6 @@ const NAV_GROUPS = [
                 label: "My Leave",
                 description: "Your remaining balance for each leave type",
                 icon: CalendarCheck,
-                roles: null,
-            },
-            {
-                to: "/dashboard/apply-leave",
-                label: "Apply Leave",
-                description: "Submit a new leave request",
-                icon: CalendarPlus,
                 roles: null,
             },
             {
@@ -108,9 +100,14 @@ const NAV_GROUPS = [
             {
                 to: "/dashboard/employees",
                 label: "All Employees",
-                description: "Everyone in the organisation, and invite new joiners",
+                // SUPER_ADMIN only, on direct request: the company-wide
+                // roster belongs to the one role that sits above every
+                // branch. An HR admin manages their own branch from My Team
+                // (which is where the per-person controls live anyway), and
+                // invites from there too.
+                description: "Everyone in the organisation, across every branch",
                 icon: IdCard,
-                roles: [ROLES.HR_ADMIN, ROLES.SUPER_ADMIN],
+                roles: [ROLES.SUPER_ADMIN],
             },
             {
                 to: "/dashboard/profile-verification",

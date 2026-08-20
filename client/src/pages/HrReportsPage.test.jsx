@@ -34,14 +34,22 @@ function renderPage() {
     });
 }
 
+// The browse endpoint is paginated: `{ requests, total }` rather than a bare
+// array, with `limit`/`offset` sent alongside the filters.
+function page(requests, total = requests.length) {
+    return { requests, total };
+}
+
+const FIRST_PAGE = { limit: 25, offset: 0 };
+
 describe("HrReportsPage", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        leaveRequestService.getFilteredLeaveRequests.mockResolvedValue([]);
+        leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page([]));
         // A different name than makeRequest()'s "Asha Employee" — otherwise
         // this dropdown option and the rendered request row would be
         // textually indistinguishable to a plain screen.getByText query.
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             { id: "emp-1", first_name: "Rahul", last_name: "Singh", role: "EMPLOYEE", email: "rahul@example.com" },
         ]);
         leaveTypeService.getLeaveTypes.mockResolvedValue([{ id: "lt-1", name: "Annual Leave" }]);
@@ -49,11 +57,11 @@ describe("HrReportsPage", () => {
 
     describe("Browse Requests tab", () => {
         it("loads with no filters applied", async () => {
-            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue([makeRequest()]);
+            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page([makeRequest()]));
             renderPage();
 
             expect(await screen.findByText("Asha Employee")).toBeInTheDocument();
-            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenCalledWith({});
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenCalledWith(FIRST_PAGE);
         });
 
         it("re-fetches with the selected employee once filters are applied", async () => {
@@ -64,11 +72,14 @@ describe("HrReportsPage", () => {
             await userEvent.click(screen.getByRole("button", { name: /rahul singh/i }));
             await userEvent.click(screen.getByRole("button", { name: /apply filters/i }));
 
-            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({ employeeId: "emp-1" });
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({
+                employeeId: "emp-1",
+                ...FIRST_PAGE,
+            });
         });
 
         it("filters the employee dropdown as the search text narrows it down", async () => {
-            userService.getUsers.mockResolvedValue([
+            userService.getUserOptions.mockResolvedValue([
                 { id: "emp-1", first_name: "Rahul", last_name: "Singh", role: "EMPLOYEE", email: "rahul@example.com" },
                 { id: "emp-2", first_name: "Priya", last_name: "Manager", role: "MANAGER", email: "priya@example.com" },
             ]);
@@ -85,7 +96,7 @@ describe("HrReportsPage", () => {
         });
 
         it("shows each result's role and email so same-named employees are distinguishable", async () => {
-            userService.getUsers.mockResolvedValue([
+            userService.getUserOptions.mockResolvedValue([
                 { id: "emp-1", first_name: "John", last_name: "Smith", role: "EMPLOYEE", email: "john.smith@example.com" },
                 { id: "emp-2", first_name: "John", last_name: "Smith", role: "MANAGER", email: "john.smith2@example.com" },
             ]);
@@ -106,12 +117,63 @@ describe("HrReportsPage", () => {
         });
 
         it("shows a read-only list — no approve/reject/override actions", async () => {
-            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue([makeRequest()]);
+            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page([makeRequest()]));
             renderPage();
 
             await screen.findByText("Asha Employee");
             expect(screen.queryByRole("button", { name: /^approve$/i })).not.toBeInTheDocument();
             expect(screen.getByRole("button", { name: /^details$/i })).toBeInTheDocument();
+        });
+
+        // Every browse result is one page now — the unfiltered default used to
+        // be "every request in this HR admin's branch", thousands of rows at
+        // NFR-7 scale.
+        it("pages through results, showing the server's total", async () => {
+            const rows = Array.from({ length: 25 }, (_, index) =>
+                makeRequest({ id: `r${index}`, employee_first_name: `Emp${index}` })
+            );
+            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page(rows, 60));
+            renderPage();
+
+            expect(await screen.findByText(/showing 1–25 of 60/i)).toBeInTheDocument();
+            expect(screen.getByRole("button", { name: /previous/i })).toBeDisabled();
+
+            await userEvent.click(screen.getByRole("button", { name: /next/i }));
+
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({ limit: 25, offset: 25 });
+            expect(await screen.findByText(/showing 26–50 of 60/i)).toBeInTheDocument();
+            expect(screen.getByRole("button", { name: /previous/i })).toBeEnabled();
+        });
+
+        it("hides the pager when everything fits on one page", async () => {
+            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page([makeRequest()], 1));
+            renderPage();
+
+            await screen.findByText("Asha Employee");
+            expect(screen.queryByRole("button", { name: /next/i })).not.toBeInTheDocument();
+            expect(screen.queryByText(/showing/i)).not.toBeInTheDocument();
+        });
+
+        // A narrower filter can have fewer rows than the offset the previous
+        // result set was on — staying there would render an empty table that
+        // reads as "no matches".
+        it("returns to the first page when filters are applied or cleared", async () => {
+            leaveRequestService.getFilteredLeaveRequests.mockResolvedValue(page([makeRequest()], 60));
+            renderPage();
+            await screen.findByText("Asha Employee");
+
+            await userEvent.click(screen.getByRole("button", { name: /next/i }));
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({ limit: 25, offset: 25 });
+
+            const employeeInput = await screen.findByLabelText(/^employee$/i);
+            await userEvent.click(employeeInput);
+            await userEvent.click(screen.getByRole("button", { name: /rahul singh/i }));
+            await userEvent.click(screen.getByRole("button", { name: /apply filters/i }));
+
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({
+                employeeId: "emp-1",
+                ...FIRST_PAGE,
+            });
         });
 
         it("clearing filters resets and re-fetches with none applied", async () => {
@@ -123,7 +185,7 @@ describe("HrReportsPage", () => {
             await userEvent.click(screen.getByRole("button", { name: /apply filters/i }));
             await userEvent.click(screen.getByRole("button", { name: /^clear$/i }));
 
-            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith({});
+            expect(leaveRequestService.getFilteredLeaveRequests).toHaveBeenLastCalledWith(FIRST_PAGE);
         });
     });
 

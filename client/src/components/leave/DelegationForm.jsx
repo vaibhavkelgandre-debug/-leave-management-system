@@ -1,9 +1,9 @@
 // Nominate-a-delegate form (FR-020), meant to sit inside a Modal opened from
 // DelegationsPage. The delegate list comes from the existing role-scoped
-// getUsers() call — no separate "eligible delegates" endpoint exists, so a
+// getUserOptions() call — no separate "eligible delegates" endpoint exists, so a
 // manager currently picks from whichever users they can already see.
 import { useEffect, useState } from "react";
-import { getUsers } from "../../services/userService.js";
+import { getUserOptions } from "../../services/userService.js";
 import { createDelegation } from "../../services/delegationService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { useAuth } from "../../hooks/useAuth.js";
@@ -27,7 +27,7 @@ export function DelegationForm({ onCreated }) {
     useEffect(() => {
         let cancelled = false;
 
-        getUsers()
+        getUserOptions()
             .then((data) => {
                 if (!cancelled) setUsers(data.filter((candidate) => candidate.id !== user.id));
             })

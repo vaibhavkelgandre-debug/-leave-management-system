@@ -9,7 +9,7 @@ import {
     getLeaveTakenReport,
     getLeaveTakenReportCsvUrl,
 } from "../services/leaveRequestService.js";
-import { getUsers } from "../services/userService.js";
+import { getUserOptions } from "../services/userService.js";
 import { getLeaveTypes } from "../services/leaveTypeService.js";
 import { LeaveRequestTable } from "../components/leave/LeaveRequestTable.jsx";
 import { Avatar } from "../components/ui/Avatar.jsx";
@@ -23,6 +23,10 @@ const TABS = { BROWSE: "browse", REPORT: "report" };
 const STATUS_OPTIONS = ["SUBMITTED", "APPROVED", "REJECTED", "WITHDRAWN", "CANCELLED"];
 const emptyFilters = { employeeId: "", leaveTypeId: "", status: "", startDate: "", endDate: "" };
 
+// Matches NotificationsPage's own page size — one browse-table convention
+// rather than a different number per screen. The endpoint caps it at 100.
+const PAGE_SIZE = 25;
+
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
 const labelClasses = "mb-1 block text-xs font-medium text-slate-700";
@@ -33,6 +37,13 @@ function BrowseRequestsTab() {
     const [filters, setFilters] = useState(emptyFilters);
     const [appliedFilters, setAppliedFilters] = useState(emptyFilters);
     const [requests, setRequests] = useState([]);
+    // Browse results are paginated (the unfiltered default is every request in
+    // this HR admin's branch — thousands of rows at NFR-7 scale). `total` is
+    // the server's count for the *same* filters, which is what makes
+    // "showing 1–25 of N" and the next-page guard honest rather than a guess
+    // from the page's own length.
+    const [total, setTotal] = useState(0);
+    const [offset, setOffset] = useState(0);
     // Tracks which `appliedFilters` object `requests` belongs to (reference
     // equality, not a deep compare — every call to setAppliedFilters passes
     // a fresh object), so "loading" can be derived rather than set from
@@ -59,7 +70,7 @@ function BrowseRequestsTab() {
     );
 
     useEffect(() => {
-        getUsers()
+        getUserOptions()
             .then(setUsers)
             .catch(() => setUsers([]));
         getLeaveTypes({ includeInactive: true })
@@ -77,16 +88,18 @@ function BrowseRequestsTab() {
             Object.entries(appliedFilters).filter(([, value]) => value !== "")
         );
 
-        getFilteredLeaveRequests(activeFilters)
+        getFilteredLeaveRequests({ ...activeFilters, limit: PAGE_SIZE, offset })
             .then((data) => {
                 if (cancelled) return;
-                setRequests(data);
+                setRequests(data.requests);
+                setTotal(data.total);
                 setError(null);
                 setLoadedFilters(appliedFilters);
             })
             .catch(() => {
                 if (cancelled) return;
                 setRequests([]);
+                setTotal(0);
                 setError("Unable to load requests");
                 setLoadedFilters(appliedFilters);
             });
@@ -94,7 +107,7 @@ function BrowseRequestsTab() {
         return () => {
             cancelled = true;
         };
-    }, [appliedFilters]);
+    }, [appliedFilters, offset]);
 
     function handleFilterChange(event) {
         const { name, value } = event.target;
@@ -103,10 +116,15 @@ function BrowseRequestsTab() {
 
     function handleApply(event) {
         event.preventDefault();
+        // Back to page 1: a narrower filter can easily have fewer rows than
+        // the offset the previous result set was on, which would render an
+        // empty table that looks like "no matches".
+        setOffset(0);
         setAppliedFilters(filters);
     }
 
     function handleClear() {
+        setOffset(0);
         setFilters(emptyFilters);
         setAppliedFilters(emptyFilters);
     }
@@ -223,7 +241,41 @@ function BrowseRequestsTab() {
                 {!loading && !error && requests.length === 0 && (
                     <p className="text-sm text-slate-500">No requests match these filters.</p>
                 )}
-                {!loading && !error && requests.length > 0 && <LeaveRequestTable requests={requests} />}
+                {!loading && !error && requests.length > 0 && (
+                    <>
+                        <LeaveRequestTable requests={requests} />
+                        {/* Same "Showing X–Y of Z" + prev/next shape as
+                            NotificationsPage — the app's one pagination
+                            control, so a second list doesn't invent a second
+                            idiom. Hidden entirely when everything fits on one
+                            page: a lone disabled pair of buttons is noise. */}
+                        {total > PAGE_SIZE && (
+                            <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                <p className="text-xs text-slate-500">
+                                    Showing {offset + 1}–{Math.min(offset + PAGE_SIZE, total)} of {total}
+                                </p>
+                                <div className="flex gap-2">
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={offset === 0}
+                                        onClick={() => setOffset((current) => Math.max(current - PAGE_SIZE, 0))}
+                                    >
+                                        Previous
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        disabled={offset + PAGE_SIZE >= total}
+                                        onClick={() => setOffset((current) => current + PAGE_SIZE)}
+                                    >
+                                        Next
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+                    </>
+                )}
             </div>
         </div>
     );

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { getUsers, inviteEmployee } from "../../services/userService.js";
+import { getUserOptions, inviteEmployee } from "../../services/userService.js";
 import { toErrorMessage } from "../../services/httpError.js";
 import { isValidEmail } from "../../utils/validation.js";
 import { useAuth } from "../../hooks/useAuth.js";
@@ -33,7 +33,7 @@ export function InviteEmployeeForm({ onInvited, secondaryAction }) {
     useEffect(() => {
         let cancelled = false;
 
-        getUsers()
+        getUserOptions()
             .then((data) => {
                 if (!cancelled) setUsers(data);
             })

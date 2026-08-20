@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Calculator } from "lucide-react";
 import { getMySalarySlips, getSalarySlipsForHr } from "../services/salarySlipService.js";
-import { getUsers } from "../services/userService.js";
+import { getUserOptions } from "../services/userService.js";
 import { SalarySlipList } from "../components/salary/SalarySlipList.jsx";
 import { RoleGate } from "../components/auth/RoleGate.jsx";
 import { Button } from "../components/ui/Button.jsx";
@@ -11,6 +11,9 @@ import { useAuth } from "../hooks/useAuth.js";
 import { ROLES } from "../constants/roles.js";
 
 const TABS = { MINE: "mine", TEAM: "team" };
+
+// Same page size as every other paginated list in the app.
+const PAGE_SIZE = 25;
 
 const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
@@ -39,6 +42,10 @@ export function SalarySlipsPage() {
     const [mySlipsLoaded, setMySlipsLoaded] = useState(false);
 
     const [teamSlips, setTeamSlips] = useState([]);
+    // Paginated: this list spans every payroll month ever run, not just the
+    // selected one (the pay-period filter is optional).
+    const [teamTotal, setTeamTotal] = useState(0);
+    const [teamOffset, setTeamOffset] = useState(0);
     const [teamSlipsLoaded, setTeamSlipsLoaded] = useState(false);
 
     // Bumped after a slip is voided, so the team list reflects its new
@@ -72,26 +79,30 @@ export function SalarySlipsPage() {
             payPeriod: payPeriod || undefined,
             employeeId: employeeId || undefined,
             role: role || undefined,
+            limit: PAGE_SIZE,
+            offset: teamOffset,
         })
             .then((data) => {
                 if (cancelled) return;
-                setTeamSlips(data);
+                setTeamSlips(data.slips);
+                setTeamTotal(data.total);
                 setTeamSlipsLoaded(true);
             })
             .catch(() => {
                 if (cancelled) return;
                 setTeamSlips([]);
+                setTeamTotal(0);
                 setTeamSlipsLoaded(true);
             });
         return () => {
             cancelled = true;
         };
-    }, [isHr, payPeriod, employeeId, role, reloadToken]);
+    }, [isHr, payPeriod, employeeId, role, reloadToken, teamOffset]);
 
     useEffect(() => {
         if (!isHr) return undefined;
         let cancelled = false;
-        getUsers()
+        getUserOptions()
             .then((data) => {
                 if (!cancelled) setUsers(data);
             })
@@ -112,6 +123,7 @@ export function SalarySlipsPage() {
     }
 
     function clearFilters() {
+        setTeamOffset(0);
         setPayPeriod("");
         setEmployeeId("");
         setRole("");
@@ -173,7 +185,10 @@ export function SalarySlipsPage() {
                         id="slipPayPeriod"
                         type="month"
                         value={payPeriod}
-                        onChange={(event) => setPayPeriod(event.target.value)}
+                        onChange={(event) => {
+                            setTeamOffset(0);
+                            setPayPeriod(event.target.value);
+                        }}
                         className={inputClasses}
                     />
                 </div>
@@ -188,6 +203,7 @@ export function SalarySlipsPage() {
                                 id="slipRole"
                                 value={role}
                                 onChange={(event) => {
+                                    setTeamOffset(0);
                                     setRole(event.target.value);
                                     // The previously picked person may no longer
                                     // match the new role slice — clear rather
@@ -209,7 +225,10 @@ export function SalarySlipsPage() {
                             <select
                                 id="slipEmployee"
                                 value={employeeId}
-                                onChange={(event) => setEmployeeId(event.target.value)}
+                                onChange={(event) => {
+                                    setTeamOffset(0);
+                                    setEmployeeId(event.target.value);
+                                }}
                                 className={inputClasses}
                             >
                                 <option value="">All employees</option>
@@ -250,7 +269,40 @@ export function SalarySlipsPage() {
                             </p>
                         )}
                         {teamSlipsLoaded && (
-                            <SalarySlipList slips={teamSlips} showEmployee canVoid onVoided={handleVoided} />
+                            <>
+                                <SalarySlipList slips={teamSlips} showEmployee canVoid onVoided={handleVoided} />
+                                {/* Same "Showing X–Y of Z" + prev/next as every
+                                    other paginated list; hidden when it all fits
+                                    on one page. */}
+                                {teamTotal > PAGE_SIZE && (
+                                    <div className="mt-3 flex flex-wrap items-center justify-between gap-3">
+                                        <p className="text-xs text-slate-500">
+                                            Showing {teamOffset + 1}–{Math.min(teamOffset + PAGE_SIZE, teamTotal)} of{" "}
+                                            {teamTotal}
+                                        </p>
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                disabled={teamOffset === 0}
+                                                onClick={() =>
+                                                    setTeamOffset((current) => Math.max(current - PAGE_SIZE, 0))
+                                                }
+                                            >
+                                                Previous
+                                            </Button>
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                disabled={teamOffset + PAGE_SIZE >= teamTotal}
+                                                onClick={() => setTeamOffset((current) => current + PAGE_SIZE)}
+                                            >
+                                                Next
+                                            </Button>
+                                        </div>
+                                    </div>
+                                )}
+                            </>
                         )}
                     </>
                 )}

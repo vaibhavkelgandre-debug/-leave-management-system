@@ -107,12 +107,6 @@ export function EmployeeVerificationDetailPage() {
         <div>
             <PageHeader title={`${employee.first_name} ${employee.last_name}`} description={employee.email} />
 
-            {actionError && (
-                <p role="alert" className="mt-4 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
-                    {actionError}
-                </p>
-            )}
-
             <div className="mt-6 space-y-6">
                 <Card className="p-6">
                     <h3 className={sectionHeadingClasses}>Submitted profile details</h3>
@@ -136,6 +130,19 @@ export function EmployeeVerificationDetailPage() {
                         </div>
                     </Card>
                 </div>
+
+                {/* Sits with the actions, not under the page header where it
+                    used to: verifying now fails whenever a document is still
+                    pending or was rejected (userService.verifyProfile), and
+                    those messages are the whole point of the click. The
+                    button is at the bottom of a long page, so an alert at the
+                    top was off-screen — HR would read the click as having
+                    done nothing at all. */}
+                {actionError && (
+                    <p role="alert" className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">
+                        {actionError}
+                    </p>
+                )}
 
                 {showSendBackPrompt && (
                     <Card className="p-4">

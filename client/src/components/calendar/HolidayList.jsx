@@ -88,7 +88,7 @@ export function HolidayList({ holidays, canManage, onEdit, onChanged, selectedHo
 
     return (
         <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="scrollbar-thin overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead className="bg-slate-50">
                         <tr>

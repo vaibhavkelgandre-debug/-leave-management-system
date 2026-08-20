@@ -119,7 +119,7 @@ export function NotificationBell() {
                     )}
                 </div>
 
-                <div className="max-h-96 overflow-y-auto">
+                <div className="scrollbar-thin max-h-96 overflow-y-auto">
                     {loading && (
                         <p role="status" className="px-3 py-4 text-center text-sm text-slate-500">
                             Loading…

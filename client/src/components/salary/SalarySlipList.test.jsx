@@ -26,6 +26,8 @@ const slip = {
     special_allowance: "5000",
     lop_days: "0",
     lop_deduction: "0",
+    total_leave_days: "0",
+    payable_days: "31",
     income_tax: "0",
     net_pay: "45200",
     status: "ACTIVE",

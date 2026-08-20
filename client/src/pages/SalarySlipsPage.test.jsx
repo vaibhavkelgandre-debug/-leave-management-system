@@ -37,9 +37,11 @@ describe("SalarySlipsPage", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         salarySlipService.getMySalarySlips.mockResolvedValue([]);
-        salarySlipService.getSalarySlipsForHr.mockResolvedValue([]);
+        // The team list is paginated: `{ slips, total }`, with limit/offset
+        // sent alongside the filters.
+        salarySlipService.getSalarySlipsForHr.mockResolvedValue({ slips: [], total: 0 });
         salarySlipService.getSalarySlipPdfUrl.mockReturnValue("http://localhost/api/salary-slips/s1/pdf");
-        userService.getUsers.mockResolvedValue([]);
+        userService.getUserOptions.mockResolvedValue([]);
     });
 
     it("shows an employee their own slips without any payroll controls or tabs", async () => {
@@ -53,7 +55,7 @@ describe("SalarySlipsPage", () => {
     });
 
     it("gives HR a payroll action, and their team's slips on a separate tab from their own", async () => {
-        salarySlipService.getSalarySlipsForHr.mockResolvedValue([slip]);
+        salarySlipService.getSalarySlipsForHr.mockResolvedValue({ slips: [slip], total: 1 });
         renderWithProviders(<SalarySlipsPage />, { authValue: hrAuthValue });
 
         expect(await screen.findByRole("link", { name: /run payroll/i })).toBeInTheDocument();
@@ -75,8 +77,8 @@ describe("SalarySlipsPage", () => {
 
     it("lets HR void a team member's slip, refreshing the list afterward", async () => {
         salarySlipService.getSalarySlipsForHr
-            .mockResolvedValueOnce([slip])
-            .mockResolvedValueOnce([{ ...slip, status: "VOIDED" }]);
+            .mockResolvedValueOnce({ slips: [slip], total: 1 })
+            .mockResolvedValueOnce({ slips: [{ ...slip, status: "VOIDED" }], total: 1 });
         salarySlipService.voidSalarySlip.mockResolvedValue({ ...slip, status: "VOIDED" });
         renderWithProviders(<SalarySlipsPage />, { authValue: hrAuthValue });
 
@@ -87,6 +89,36 @@ describe("SalarySlipsPage", () => {
 
         expect(salarySlipService.voidSalarySlip).toHaveBeenCalledWith("s1", undefined);
         expect(await screen.findByText("VOIDED")).toBeInTheDocument();
+    });
+
+    it("pages the team list and resets to page 1 when a filter changes", async () => {
+        const rows = Array.from({ length: 25 }, (_, index) => ({ ...slip, id: `s${index}` }));
+        salarySlipService.getSalarySlipsForHr.mockResolvedValue({ slips: rows, total: 60 });
+        renderWithProviders(<SalarySlipsPage />, { authValue: hrAuthValue });
+
+        await goToTeamTab();
+        expect(await screen.findByText(/showing 1–25 of 60/i)).toBeInTheDocument();
+
+        await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+        expect(salarySlipService.getSalarySlipsForHr).toHaveBeenLastCalledWith(
+            expect.objectContaining({ limit: 25, offset: 25 })
+        );
+
+        // A narrower filter can have fewer rows than the current offset, which
+        // would render an empty table that reads as "no slips".
+        await userEvent.selectOptions(screen.getByLabelText(/^role$/i), ROLES.MANAGER);
+        expect(salarySlipService.getSalarySlipsForHr).toHaveBeenLastCalledWith(
+            expect.objectContaining({ role: ROLES.MANAGER, offset: 0 })
+        );
+    });
+
+    it("hides the team pager when everything fits on one page", async () => {
+        salarySlipService.getSalarySlipsForHr.mockResolvedValue({ slips: [slip], total: 1 });
+        renderWithProviders(<SalarySlipsPage />, { authValue: hrAuthValue });
+
+        await goToTeamTab();
+        await screen.findByText("2026-03");
+        expect(screen.queryByRole("button", { name: /^next$/i })).not.toBeInTheDocument();
     });
 
     it("filters by pay period, sending it to the currently active tab's fetch", async () => {
@@ -104,7 +136,7 @@ describe("SalarySlipsPage", () => {
     });
 
     it("shows role and employee filters only on the team tab, narrowing the employee list by the picked role", async () => {
-        userService.getUsers.mockResolvedValue([
+        userService.getUserOptions.mockResolvedValue([
             { id: "mgr-1", first_name: "Manoj", last_name: "Kumar", role: ROLES.MANAGER },
             { id: "emp-1", first_name: "Zara", last_name: "Employee", role: ROLES.EMPLOYEE },
         ]);
@@ -127,6 +159,8 @@ describe("SalarySlipsPage", () => {
             payPeriod: undefined,
             employeeId: undefined,
             role: ROLES.MANAGER,
+            limit: 25,
+            offset: 0,
         });
     });
 });

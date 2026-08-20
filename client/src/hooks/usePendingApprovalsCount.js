@@ -1,21 +1,22 @@
 import { useEffect, useState } from "react";
-import { getTeamLeaveRequests } from "../services/leaveRequestService.js";
-import { useAuth } from "./useAuth.js";
-import { canDecideDirectly } from "../utils/leaveRequestAuthz.js";
+import { getPendingApprovalsCount } from "../services/leaveRequestService.js";
 
-// Count of SUBMITTED requests the caller can actually act on *right now* —
-// the same data ApprovalsPage already fetches, just counted instead of
-// rendered, so the sidebar's Approvals link can show how many are waiting.
-// For a manager/delegate that's every SUBMITTED row in their (already
-// server-scoped) team list; for HR it's narrowed further to
-// canDecideDirectly (HR is genuinely the assigned manager) — HR's team list
-// spans their whole reporting subtree for visibility, most of which is still
-// awaiting the actual manager's decision, not HR's (see leaveRequestAuthz.js).
-// `enabled` skips the fetch entirely for anyone who can't see that link at
-// all (most employees), instead of every page load quietly calling an
+// Count of SUBMITTED requests the caller can actually act on right now, for
+// the sidebar's Approvals badge.
+//
+// Resolved by the server (GET /leave-requests/pending-count) rather than by
+// fetching the team list and filtering it here. That earlier shape downloaded
+// every request in the caller's team scope — thousands of rows, several
+// megabytes at NFR-7's "200 employees and three years" target — on **every
+// page load**, to display one integer. The rule itself didn't change: the
+// employee's assigned manager is the caller, or a manager the caller is
+// currently an active delegate for (see leaveRequestService.countPendingDecisions;
+// it is the same rule canDecideDirectly applied here before).
+//
+// `enabled` still skips the request entirely for anyone who can't see the
+// Approvals link at all, rather than every page load quietly calling an
 // endpoint whose result they'll never use.
 export function usePendingApprovalsCount(enabled) {
-    const { user } = useAuth();
     const [count, setCount] = useState(0);
 
     useEffect(() => {
@@ -31,23 +32,18 @@ export function usePendingApprovalsCount(enabled) {
 
         let cancelled = false;
 
-        getTeamLeaveRequests()
-            .then((requests) => {
-                if (cancelled) return;
-                setCount(
-                    requests.filter((request) => request.status === "SUBMITTED" && canDecideDirectly(request, user))
-                        .length
-                );
+        getPendingApprovalsCount()
+            .then((value) => {
+                if (!cancelled) setCount(value);
             })
             .catch(() => {
-                if (cancelled) return;
-                setCount(0);
+                if (!cancelled) setCount(0);
             });
 
         return () => {
             cancelled = true;
         };
-    }, [enabled, user]);
+    }, [enabled]);
 
     return enabled ? count : 0;
 }

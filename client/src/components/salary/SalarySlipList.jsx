@@ -55,6 +55,16 @@ function SlipBreakdown({ slip }) {
                         {slip.lop_days} day{Number(slip.lop_days) === 1 ? "" : "s"} ({money(slip.lop_deduction)})
                     </td>
                 </tr>
+                <tr>
+                    <td className="py-1.5 text-slate-500">Total leave taken</td>
+                    <td className="py-1.5 text-right font-medium text-slate-800">
+                        {slip.total_leave_days} day{Number(slip.total_leave_days) === 1 ? "" : "s"}
+                    </td>
+                </tr>
+                <tr>
+                    <td className="py-1.5 text-slate-500">Payable days</td>
+                    <td className="py-1.5 text-right font-medium text-slate-800">{slip.payable_days}</td>
+                </tr>
                 {isVoided && slip.void_reason && (
                     <tr>
                         <td className="py-1.5 text-slate-500">Void reason</td>
@@ -128,6 +138,11 @@ function SalarySlipRow({ slip, showEmployee, canVoid, onVoided, columnCount, exp
                 </td>
                 <td className={`${tdClasses} text-right`}>
                     <div className="flex items-center justify-end gap-1">
+                        {canVoid && !isVoided && !showVoidPrompt && (
+                            <Button size="sm" variant="danger" onClick={() => setShowVoidPrompt(true)}>
+                                Void
+                            </Button>
+                        )}
                         <Link
                             to={`/dashboard/documents/preview?salarySlipId=${slip.id}&payPeriod=${slip.pay_period}`}
                             aria-label={`View payslip for ${slip.pay_period}`}
@@ -143,11 +158,6 @@ function SalarySlipRow({ slip, showEmployee, canVoid, onVoided, columnCount, exp
                         >
                             <Download className="h-4 w-4" aria-hidden="true" />
                         </a>
-                        {canVoid && !isVoided && !showVoidPrompt && (
-                            <Button size="sm" variant="danger" onClick={() => setShowVoidPrompt(true)}>
-                                Void
-                            </Button>
-                        )}
                     </div>
                 </td>
             </tr>
@@ -207,7 +217,7 @@ export function SalarySlipList({ slips, showEmployee = false, canVoid = false, o
 
     return (
         <Card className="overflow-hidden">
-            <div className="overflow-x-auto">
+            <div className="scrollbar-thin overflow-x-auto">
                 <table className="w-full text-sm">
                     <thead className="bg-slate-50">
                         <tr>

@@ -8,10 +8,12 @@
 // someone actually needs to read closely; leave request documents still use
 // the modal (not asked to change). Reached via query params rather than a
 // route param, since which document to show varies by shape rather than a
-// single id. Fetches its own fresh signed URL on mount (and again on every
-// reload, or if the query params change) rather than trusting one handed in
-// some other way — Cloudinary's signed URLs expire a few minutes after being
-// minted (cloudinaryService.js). No role gate at the route level:
+// single id. Fetches the document's metadata on mount (and again on every
+// reload, or if the query params change) rather than trusting anything handed
+// in some other way; the bytes themselves are then streamed through this
+// app's own endpoint, not Cloudinary — see `previewUrl` below for why that
+// distinction is what makes a PDF previewable at all. No role gate at the
+// route level:
 // `getDocumentUrl` (the "someone else's document" case) already enforces
 // self-or-HR-in-subtree server-side, so an unauthorized `employeeId` in the
 // URL just surfaces as this page's own error state, same as any other
@@ -20,7 +22,12 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { ArrowLeft, ExternalLink } from "lucide-react";
-import { getMyDocumentUrl, getMyCustomDocumentUrl, getDocumentUrl } from "../services/employeeDocumentService.js";
+import {
+    getMyDocumentUrl,
+    getMyCustomDocumentUrl,
+    getDocumentUrl,
+    getDocumentFileUrl,
+} from "../services/employeeDocumentService.js";
 import { getSalarySlipPdfUrl } from "../services/salarySlipService.js";
 import { toErrorMessage } from "../services/httpError.js";
 import { Button } from "../components/ui/Button.jsx";
@@ -90,6 +97,24 @@ export function DocumentViewerPage() {
     const isPreviewable =
         isImage || previewDocument?.mimeType === "application/pdf" || previewDocument?.mimeType?.startsWith("text/");
 
+    // An employee document is rendered from *this* app's own stream, never
+    // from the Cloudinary URL in `previewDocument.url`. PDFs are stored as
+    // Cloudinary `raw` assets, and raw delivery sends
+    // `Content-Disposition: attachment` — so the previous `src={url}` made
+    // the browser download the file the moment this page opened, with no way
+    // to actually read it. The disposition belongs to whoever serves the
+    // bytes, so the fix is to serve them ourselves (`GET
+    // /employees/documents/:id/file`, inline by default).
+    //
+    // Salary slips already come through their own same-origin endpoint and
+    // have no `documentId`, so they keep using the URL they were handed —
+    // hence the fallback rather than a hard switch.
+    const previewUrl = previewDocument
+        ? previewDocument.documentId
+            ? getDocumentFileUrl(previewDocument.documentId)
+            : previewDocument.url
+        : null;
+
     return (
         <div className="flex h-[calc(100vh-7rem)] flex-col">
             {/* A slim toolbar, not a full page-header row — every pixel here
@@ -105,7 +130,7 @@ export function DocumentViewerPage() {
                 </h1>
                 {previewDocument && (
                     <a
-                        href={previewDocument.url}
+                        href={previewUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex shrink-0 items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
@@ -129,14 +154,14 @@ export function DocumentViewerPage() {
                 )}
                 {!error && previewDocument && isImage && (
                     <img
-                        src={previewDocument.url}
+                        src={previewUrl}
                         alt={previewDocument.filename}
                         className="max-h-full max-w-full object-contain"
                     />
                 )}
                 {!error && previewDocument && !isImage && isPreviewable && (
                     <iframe
-                        src={previewDocument.url}
+                        src={previewUrl}
                         title={previewDocument.filename}
                         className="h-full w-full rounded-md border border-slate-200"
                     />

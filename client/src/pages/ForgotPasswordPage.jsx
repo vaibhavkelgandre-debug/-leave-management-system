@@ -48,12 +48,41 @@ export function ForgotPasswordPage() {
 
                 {submitted ? (
                     <>
+                        {/* The address is echoed back deliberately. This page
+                            can't say whether it's registered (that would make
+                            the endpoint an account-enumeration tool — see
+                            passwordResetService.js), so showing the user what
+                            they actually typed is the only way they can catch
+                            their own typo, which is otherwise indistinguishable
+                            from success. */}
                         <p className="mt-4 rounded-md bg-green-50 px-3 py-2 text-sm text-green-800">
-                            If an account exists for that email, a reset link has been sent.
+                            If an account exists for{" "}
+                            <span className="font-medium break-all">{email}</span>, a reset link has been sent. It
+                            expires in 1 hour.
                         </p>
-                        <Link to="/login" className="mt-4 inline-block text-sm font-medium text-indigo-600 hover:text-indigo-700">
-                            Back to sign in
-                        </Link>
+
+                        <div className="mt-4 rounded-md bg-slate-50 px-3 py-3 text-sm text-slate-600">
+                            <p className="font-medium text-slate-700">Didn't get it?</p>
+                            <ul className="mt-1 list-disc space-y-1 pl-4">
+                                <li>Check your spam or junk folder.</li>
+                                <li>
+                                    Make sure that's the address your account is registered with — for security we
+                                    can't confirm whether an address exists.
+                                </li>
+                            </ul>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center gap-4">
+                            {/* Returns to the form with the address still in
+                                place, so a typo is one edit away from fixed
+                                rather than a full retype. */}
+                            <Button variant="secondary" size="sm" onClick={() => setSubmitted(false)}>
+                                Try a different email
+                            </Button>
+                            <Link to="/login" className="text-sm font-medium text-indigo-600 hover:text-indigo-700">
+                                Back to sign in
+                            </Link>
+                        </div>
                     </>
                 ) : (
                     <>

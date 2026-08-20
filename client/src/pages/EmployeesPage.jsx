@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { Plus } from "lucide-react";
 import { getUsers } from "../services/userService.js";
-import { EmployeePersonRow } from "../components/team/EmployeePersonRow.jsx";
+import { EmployeeTable } from "../components/team/EmployeeTable.jsx";
 import { EmployeeTeamCard } from "../components/team/EmployeeTeamCard.jsx";
-import { InviteEmployeeForm } from "../components/team/InviteEmployeeForm.jsx";
 import { Button } from "../components/ui/Button.jsx";
-import { Card } from "../components/ui/Card.jsx";
-import { Modal } from "../components/ui/Modal.jsx";
 import { PageHeader } from "../components/ui/PageHeader.jsx";
 import { groupEmployeesForOrgView } from "../utils/employeeGroups.js";
 
@@ -15,9 +13,11 @@ export function EmployeesPage() {
     // no setState happens synchronously inside the effect.
     const [users, setUsers] = useState(null);
     const [loadError, setLoadError] = useState(null);
-    const [showInviteModal, setShowInviteModal] = useState(false);
 
-    // Bumped by a row (or a successful invite) to re-trigger the fetch effect.
+    // Bumped by a row to re-trigger the fetch effect. A successful invite no
+    // longer bumps this directly — AddEmployeePage.jsx is its own route now,
+    // so returning here via its "Back to All Employees" link remounts this
+    // page and refetches on its own.
     const [reloadToken, setReloadToken] = useState(0);
     const reload = () => setReloadToken((token) => token + 1);
 
@@ -49,17 +49,13 @@ export function EmployeesPage() {
         <div>
             <PageHeader
                 title="All Employees"
-                description="Grouped by reporting line — each team's own card lists who reports to whom. Manage your own team's details from My Team."
+                description="Grouped by reporting line — each team's own table lists who reports to whom. Manage your own team's details from My Team."
                 action={
-                    <Button icon={Plus} onClick={() => setShowInviteModal(true)}>
+                    <Button as={Link} to="/dashboard/employees/new" icon={Plus}>
                         Add Employee
                     </Button>
                 }
             />
-
-            <Modal open={showInviteModal} onClose={() => setShowInviteModal(false)} title="Invite an employee">
-                <InviteEmployeeForm onInvited={reload} />
-            </Modal>
 
             {loading && (
                 <p role="status" className="mt-8 text-sm text-slate-500">
@@ -76,20 +72,16 @@ export function EmployeesPage() {
                 <div className="mt-8 space-y-8">
                     <section>
                         <h2 className="text-lg font-semibold text-slate-900">Leadership</h2>
-                        <Card className="mt-3 overflow-hidden">
-                            <ul className="divide-y divide-slate-100">
-                                {leadership.map((hrAdmin) => (
-                                    <EmployeePersonRow
-                                        key={hrAdmin.id}
-                                        user={hrAdmin}
-                                        users={users}
-                                        onChanged={reload}
-                                        showReportsTo
-                                        showActions={false}
-                                    />
-                                ))}
-                            </ul>
-                        </Card>
+                        <div className="mt-3">
+                            <EmployeeTable
+                                people={leadership}
+                                users={users}
+                                onChanged={reload}
+                                showReportsTo
+                                showActions={false}
+                                emptyMessage="No one yet."
+                            />
+                        </div>
                     </section>
 
                     <section>
@@ -114,20 +106,15 @@ export function EmployeesPage() {
                     {unassigned.length > 0 && (
                         <section>
                             <h2 className="text-lg font-semibold text-slate-900">Reports directly to HR</h2>
-                            <Card className="mt-3 overflow-hidden">
-                                <ul className="divide-y divide-slate-100">
-                                    {unassigned.map((employee) => (
-                                        <EmployeePersonRow
-                                            key={employee.id}
-                                            user={employee}
-                                            users={users}
-                                            onChanged={reload}
-                                            showReportsTo
-                                            showActions={false}
-                                        />
-                                    ))}
-                                </ul>
-                            </Card>
+                            <div className="mt-3">
+                                <EmployeeTable
+                                    people={unassigned}
+                                    users={users}
+                                    onChanged={reload}
+                                    showReportsTo
+                                    showActions={false}
+                                />
+                            </div>
                         </section>
                     )}
                 </div>

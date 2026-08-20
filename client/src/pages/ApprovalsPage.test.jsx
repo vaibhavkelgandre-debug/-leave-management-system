@@ -33,14 +33,33 @@ function makeRequest(overrides = {}) {
     };
 }
 
+// Both list endpoints are paginated (`{ requests, total }`) and take either a
+// page (`limit`/`offset`, for the list) or a window (`startDate`/`endDate`, for
+// the calendar) — so a single mock has to answer both shapes. `pageOf` returns
+// every request for a windowed call and one page for a paged one, which is what
+// the real endpoint does.
+function pageOf(requests) {
+    return (params = {}) =>
+        Promise.resolve(
+            params.startDate
+                ? { requests, total: requests.length }
+                : {
+                      requests: requests.slice(params.offset ?? 0, (params.offset ?? 0) + (params.limit ?? 25)),
+                      total: requests.length,
+                  }
+        );
+}
+
 describe("ApprovalsPage", () => {
     beforeEach(() => {
         vi.clearAllMocks();
         holidayService.getHolidays.mockResolvedValue([]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([]));
+        leaveRequestService.getAllLeaveRequests.mockImplementation(pageOf([]));
     });
 
     it("shows no tabs for a MANAGER, and fetches only the team-scoped list", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
         });
@@ -56,7 +75,7 @@ describe("ApprovalsPage", () => {
     // authority SUPER_ADMIN doesn't have, so the two roles' views differ in
     // both directions.
     it("shows HR one team-scoped, actionable list and no tabs at all", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }),
         });
@@ -69,7 +88,7 @@ describe("ApprovalsPage", () => {
     });
 
     it("defaults SUPER_ADMIN to the My Team tab", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
@@ -81,8 +100,8 @@ describe("ApprovalsPage", () => {
     });
 
     it("switches SUPER_ADMIN to the company-wide, read-only All Requests tab when clicked", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest({ id: "team-req" })]);
-        leaveRequestService.getAllLeaveRequests.mockResolvedValue([makeRequest({ id: "all-req" })]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest({ id: "team-req" })]));
+        leaveRequestService.getAllLeaveRequests.mockImplementation(pageOf([makeRequest({ id: "all-req" })]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
@@ -99,8 +118,8 @@ describe("ApprovalsPage", () => {
     });
 
     it("switching back to My Team re-fetches the scoped list", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
-        leaveRequestService.getAllLeaveRequests.mockResolvedValue([makeRequest()]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
+        leaveRequestService.getAllLeaveRequests.mockImplementation(pageOf([makeRequest()]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
@@ -112,11 +131,49 @@ describe("ApprovalsPage", () => {
         await userEvent.click(screen.getByRole("tab", { name: /my team/i }));
 
         await screen.findByRole("tab", { name: /my team/i });
-        expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalledTimes(2);
+        // Two list fetches: the initial one and the one after switching back.
+        expect(
+            leaveRequestService.getTeamLeaveRequests.mock.calls.filter(([params]) => params?.limit).length
+        ).toBe(2);
+    });
+
+    // The reason the list and the calendar are two fetches: paginating one
+    // feed would have silently truncated the other.
+    it("pages the list while the calendar keeps its whole month", async () => {
+        const rows = Array.from({ length: 30 }, (_, index) =>
+            makeRequest({ id: `req-${index}`, employee_first_name: `Emp${index}` })
+        );
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf(rows));
+        renderWithProviders(<ApprovalsPage />, {
+            authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
+        });
+
+        expect(await screen.findByText(/showing 1–25 of 30/i)).toBeInTheDocument();
+        // Windowed call (the calendar's) asked for no page at all.
+        const windowed = leaveRequestService.getTeamLeaveRequests.mock.calls.filter(([params]) => params?.startDate);
+        expect(windowed.length).toBeGreaterThan(0);
+        expect(windowed[0][0].limit).toBeUndefined();
+
+        // Exact match: FullCalendar's toolbar has its own "Next month" button.
+        await userEvent.click(screen.getByRole("button", { name: /^next$/i }));
+
+        expect(await screen.findByText(/showing 26–30 of 30/i)).toBeInTheDocument();
+        expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenLastCalledWith({ limit: 25, offset: 25 });
+    });
+
+    it("hides the pager when everything fits on one page", async () => {
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
+        renderWithProviders(<ApprovalsPage />, {
+            authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
+        });
+
+        await screen.findByText("Asha Employee");
+        expect(screen.queryByRole("button", { name: /^next$/i })).not.toBeInTheDocument();
+        expect(screen.queryByText(/showing/i)).not.toBeInTheDocument();
     });
 
     it("shows the team calendar (FR-023) alongside the list for a MANAGER", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([makeRequest()]);
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([makeRequest()]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
         });
@@ -127,9 +184,9 @@ describe("ApprovalsPage", () => {
     });
 
     it("clicking a request's bar on the team calendar highlights its row in the list", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([
             makeRequest({ start_date: todayDateKey(), end_date: todayDateKey() }),
-        ]);
+        ]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
         });
@@ -149,9 +206,9 @@ describe("ApprovalsPage", () => {
     // `title` tooltip, which rendered as a dark OS box beside the app's own
     // light tooltips on every icon button.
     it("shows the app's own tooltip when hovering a leave bar on the team calendar", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
+        leaveRequestService.getTeamLeaveRequests.mockImplementation(pageOf([
             makeRequest({ start_date: todayDateKey(), end_date: todayDateKey() }),
-        ]);
+        ]));
         renderWithProviders(<ApprovalsPage />, {
             authValue: makeAuthValue({ user: { id: "mgr-1", role: ROLES.MANAGER } }),
         });

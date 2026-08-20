@@ -81,7 +81,7 @@ export function SearchSelect({ id, options, value, onChange, placeholder = "Ever
                 behind it, at the cost of a small layout shift. max-h-64 +
                 overflow-auto still caps how much it can push by. */}
             {editing && (
-                <ul className="relative z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
+                <ul className="scrollbar-thin relative z-10 mt-1 max-h-64 w-full overflow-auto rounded-lg border border-slate-200 bg-white py-1 shadow-lg">
                     <li>
                         <button
                             type="button"

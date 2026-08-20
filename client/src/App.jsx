@@ -7,6 +7,7 @@ import { AcceptInvitePage } from "./pages/AcceptInvitePage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { TeamPage } from "./pages/TeamPage.jsx";
 import { EmployeesPage } from "./pages/EmployeesPage.jsx";
+import { AddEmployeePage } from "./pages/AddEmployeePage.jsx";
 import { EmployeeDetailsPage } from "./pages/EmployeeDetailsPage.jsx";
 import { HrReportsPage } from "./pages/HrReportsPage.jsx";
 import { MyBalancesPage } from "./pages/MyBalancesPage.jsx";
@@ -48,7 +49,14 @@ function App() {
                     <Route index element={<DashboardPage />} />
 
                     <Route path="my-leave" element={<MyBalancesPage />} />
-                    <Route path="apply-leave" element={<ApplyLeavePage />} />
+                    {/* Nested under my-leave, and reached only from that
+                        page's "Request Leave" button — there's no sidebar
+                        entry for it any more (direct request). Still a real
+                        route rather than a modal on My Leave: see
+                        ApplyLeavePage.jsx for why the modal/query-param
+                        version couldn't work. */}
+                    <Route path="my-leave/apply-leave" element={<ApplyLeavePage />} />
+
                     {/* Everyone can view the holiday calendar; only HR sees the
                         add/delete controls inside the page. */}
                     <Route path="holidays" element={<HolidaysPage />} />
@@ -84,8 +92,18 @@ function App() {
                         <Route path="delegations" element={<DelegationsPage />} />
                     </Route>
 
-                    <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]} />}>
+                    {/* The company-wide roster is SUPER_ADMIN's alone now
+                        (direct request) — an HR admin's view of people is
+                        their own branch, via My Team. Note "employees/new"
+                        is deliberately NOT in here: inviting is still an
+                        HR_ADMIN capability, so it keeps the wider gate
+                        below. */}
+                    <Route element={<RequireRole allowedRoles={[ROLES.SUPER_ADMIN]} />}>
                         <Route path="employees" element={<EmployeesPage />} />
+                    </Route>
+
+                    <Route element={<RequireRole allowedRoles={[ROLES.HR_ADMIN, ROLES.SUPER_ADMIN]} />}>
+                        <Route path="employees/new" element={<AddEmployeePage />} />
                         {/* Under /team, not /employees — reached from "My
                             Team" and from the "Verified Employees" list on
                             the verification page, not from "All Employees"

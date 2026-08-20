@@ -10,24 +10,25 @@ import { ROLES } from "../../constants/roles.js";
 vi.mock("../../services/leaveRequestService.js");
 vi.mock("../../services/userService.js");
 
+// Three focused endpoints now, none of them a list this tile counts itself:
+// a pending *count*, today's rows only, and a team *size*. See
+// TeamOverviewSummary.jsx's header for what it used to download instead.
 describe("TeamOverviewSummary", () => {
     beforeEach(() => {
         vi.clearAllMocks();
-        userService.getMyTeam.mockResolvedValue([{ id: "u1" }, { id: "u2" }]);
+        userService.getMyTeamSize.mockResolvedValue(2);
+        leaveRequestService.getPendingApprovalsCount.mockResolvedValue(0);
+        leaveRequestService.getOnLeaveToday.mockResolvedValue([]);
     });
 
     it("shows the team headcount", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
         renderWithProviders(<TeamOverviewSummary />);
 
         expect(await screen.findByText("2 people")).toBeInTheDocument();
     });
 
     it("offers a review link when requests are pending", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
-            { id: "r1", status: "SUBMITTED" },
-            { id: "r2", status: "SUBMITTED" },
-        ]);
+        leaveRequestService.getPendingApprovalsCount.mockResolvedValue(2);
         renderWithProviders(<TeamOverviewSummary />);
 
         expect(await screen.findByText("2")).toBeInTheDocument();
@@ -36,7 +37,6 @@ describe("TeamOverviewSummary", () => {
     });
 
     it("shows no review link when nothing is pending", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
         renderWithProviders(<TeamOverviewSummary />);
 
         expect(await screen.findByText("No requests waiting for a decision.")).toBeInTheDocument();
@@ -45,7 +45,11 @@ describe("TeamOverviewSummary", () => {
 
     it("lists who is on approved leave today", async () => {
         const today = todayDateKey();
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
+        // The endpoint already returns only today's approved rows, so this is
+        // exactly what the tile receives — no client-side status/date filter
+        // left to exercise here (that rule lives in
+        // leaveRequestService.listOnLeaveToday, covered server-side).
+        leaveRequestService.getOnLeaveToday.mockResolvedValue([
             {
                 id: "r1",
                 status: "APPROVED",
@@ -58,18 +62,6 @@ describe("TeamOverviewSummary", () => {
                 end_date: today,
                 working_days: "1.0",
                 start_half_day: true,
-            },
-            {
-                id: "r2",
-                status: "APPROVED",
-                employee_first_name: "Rohit",
-                employee_last_name: "Peer",
-                employee_role: "MANAGER",
-                employee_email: "rohit@example.com",
-                leave_type_name: "Annual Leave",
-                start_date: "2099-01-01",
-                end_date: "2099-01-02",
-                working_days: "2.0",
             },
         ]);
         renderWithProviders(<TeamOverviewSummary />);
@@ -92,7 +84,6 @@ describe("TeamOverviewSummary", () => {
         // reads the row's own text rather than matching a single node.
         expect(nameCell.closest("tr").textContent).toMatch(/1 day \(half day\)/);
 
-        expect(screen.queryByText(/rohit peer/i)).not.toBeInTheDocument();
     });
 
     it("sorts the people who are out today by name", async () => {
@@ -109,7 +100,7 @@ describe("TeamOverviewSummary", () => {
             end_date: today,
             working_days: "1.0",
         });
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([
+        leaveRequestService.getOnLeaveToday.mockResolvedValue([
             onLeave("r1", "Zara"),
             onLeave("r2", "Asha"),
             onLeave("r3", "Meera"),
@@ -124,52 +115,41 @@ describe("TeamOverviewSummary", () => {
         expect(names).toEqual(["Asha Out", "Meera Out", "Zara Out"]);
     });
 
-    // SUPER_ADMIN's HR scope is its direct-report HR admins only, so the
-    // team-scoped list would show it an almost-empty "on leave today" beside a
-    // whole-company headcount. It reads the company-wide list instead — the
-    // one GET /leave-requests/all is now gated to.
-    it("reads the company-wide list for SUPER_ADMIN, and the team list for everyone else", async () => {
-        const today = todayDateKey();
-        leaveRequestService.getAllLeaveRequests.mockResolvedValue([
-            {
-                id: "r9",
-                status: "APPROVED",
-                employee_first_name: "Deep",
-                employee_last_name: "Branch",
-                employee_role: "EMPLOYEE",
-                employee_email: "deep@example.com",
-                leave_type_name: "Casual Leave",
-                start_date: today,
-                end_date: today,
-                working_days: "1.0",
-            },
-        ]);
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
-
+    // The company-wide-vs-team decision moved into
+    // leaveRequestService.listOnLeaveToday (asserted server-side in
+    // leaveRequests.test.js) — one endpoint serves both now, so all that's
+    // role-dependent here is the title.
+    it("titles itself for the organisation for SUPER_ADMIN, and for the team otherwise", async () => {
         const { unmount } = renderWithProviders(<TeamOverviewSummary />, {
             authValue: makeAuthValue({ user: { id: "super-1", role: ROLES.SUPER_ADMIN } }),
         });
 
-        expect(await screen.findByText("Deep Branch")).toBeInTheDocument();
-        expect(screen.getByText("Organisation overview")).toBeInTheDocument();
-        expect(leaveRequestService.getAllLeaveRequests).toHaveBeenCalled();
-        expect(leaveRequestService.getTeamLeaveRequests).not.toHaveBeenCalled();
+        expect(await screen.findByText("Organisation overview")).toBeInTheDocument();
         unmount();
 
-        vi.clearAllMocks();
-        userService.getMyTeam.mockResolvedValue([]);
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
         renderWithProviders(<TeamOverviewSummary />, {
             authValue: makeAuthValue({ user: { id: "hr-1", role: ROLES.HR_ADMIN } }),
         });
 
         expect(await screen.findByText("Team overview")).toBeInTheDocument();
-        expect(leaveRequestService.getTeamLeaveRequests).toHaveBeenCalled();
+    });
+
+    // The regression this whole change exists to prevent: the tile must never
+    // go back to fetching a request list (or a full subtree of users) to derive
+    // a count from it.
+    it("never fetches a request list or the full team roster", async () => {
+        renderWithProviders(<TeamOverviewSummary />);
+
+        expect(await screen.findByText(/nobody's out today/i)).toBeInTheDocument();
+        expect(leaveRequestService.getTeamLeaveRequests).not.toHaveBeenCalled();
         expect(leaveRequestService.getAllLeaveRequests).not.toHaveBeenCalled();
+        expect(userService.getMyTeam).not.toHaveBeenCalled();
+        expect(leaveRequestService.getOnLeaveToday).toHaveBeenCalled();
+        expect(leaveRequestService.getPendingApprovalsCount).toHaveBeenCalled();
+        expect(userService.getMyTeamSize).toHaveBeenCalled();
     });
 
     it("says nobody's out when no one is on approved leave today", async () => {
-        leaveRequestService.getTeamLeaveRequests.mockResolvedValue([]);
         renderWithProviders(<TeamOverviewSummary />);
 
         expect(await screen.findByText(/nobody's out today/i)).toBeInTheDocument();

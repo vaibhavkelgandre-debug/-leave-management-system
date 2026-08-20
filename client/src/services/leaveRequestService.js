@@ -44,19 +44,39 @@ export async function getMyLeaveRequests() {
     return unwrap(response);
 }
 
-export async function getTeamLeaveRequests() {
-    const response = await apiClient.get("/leave-requests/team");
+// Two bounded shapes, matching the endpoint: pass `{ limit, offset }` for a
+// page of the list, or `{ startDate, endDate }` for every request overlapping
+// a window (the approvals calendar's visible month — a page can't express
+// that). Returns `{ requests, total }` either way.
+export async function getTeamLeaveRequests(params = {}) {
+    const response = await apiClient.get("/leave-requests/team", { params });
     return unwrap(response);
 }
 
 // HR-only company-wide view — see server/src/routes/leaveRequestRoutes.js.
+// Count-only, so the sidebar badge doesn't download the team's whole request
+// history to render one integer — same pattern as
+// getUnreadNotificationCount. Returns a number, not the `{ count }` envelope,
+// so callers read it like any other scalar.
+export async function getPendingApprovalsCount() {
+    const response = await apiClient.get("/leave-requests/pending-count");
+    return unwrap(response).count;
+}
+
+// Just today's approved leave, for the dashboard tile — the same rows it used
+// to filter out of the entire team (or company) history client-side.
+export async function getOnLeaveToday() {
+    const response = await apiClient.get("/leave-requests/on-leave-today");
+    return unwrap(response);
+}
+
 // Broader than getTeamLeaveRequests' own HR results: that one is scoped to
 // the caller's own reporting subtree (what they can actually act on), this
 // one is everyone (for browsing/context only — the server still enforces
 // the same subtree scoping if an action is attempted on a row from here
 // that isn't actually the caller's).
-export async function getAllLeaveRequests() {
-    const response = await apiClient.get("/leave-requests/all");
+export async function getAllLeaveRequests(params = {}) {
+    const response = await apiClient.get("/leave-requests/all", { params });
     return unwrap(response);
 }
 
@@ -66,6 +86,11 @@ export async function getAllLeaveRequests() {
 // already-fetched list. `filters` may include employeeId/leaveTypeId/status/
 // startDate/endDate; axios drops any key whose value is undefined/empty
 // rather than sending it as a literal "undefined" query param.
+// Returns `{ requests, total }` — paginated, so callers pass `limit`/`offset`
+// among the filters and get the total row count back for the same filters.
+// Same contract as getNotifications; the endpoint caps `limit` at 100 and
+// defaults it, so an omitted page is still a bounded request rather than the
+// whole table.
 export async function getFilteredLeaveRequests(filters = {}) {
     const response = await apiClient.get("/leave-requests", { params: filters });
     return unwrap(response);

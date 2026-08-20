@@ -154,7 +154,7 @@ export function LeaveTypesPage() {
                         {/* overflow-x-auto lets this (the widest table in the app)
                             scroll horizontally on a phone-width screen instead of
                             clipping columns (NFR-8). */}
-                        <div className="overflow-x-auto">
+                        <div className="scrollbar-thin overflow-x-auto">
                             <table className="w-full text-left text-sm">
                                 <thead className="bg-slate-50 text-slate-500">
                                     <tr>
