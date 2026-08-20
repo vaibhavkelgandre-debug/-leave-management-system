@@ -51,15 +51,6 @@ function formatDateDDMMYYYY(value) {
     return `${day}/${month}/${year}`;
 }
 
-// Days in the calendar month a "YYYY-MM" pay period falls in — used only to
-// derive "Paid Days" (days in month minus LOP days) for display; the actual
-// LOP deduction math already happened in salarySlipService.js and isn't
-// recomputed here.
-function daysInPayPeriod(payPeriod) {
-    const [year, month] = payPeriod.split("-").map(Number);
-    return new Date(year, month, 0).getDate();
-}
-
 // One "Label    Value" pair at an explicit position — every multi-column
 // section below tracks its own `y` manually rather than relying on
 // pdfkit's auto-flowing cursor, since that cursor is inherently
@@ -113,7 +104,10 @@ export function renderPayslipPdf(slip) {
     const lopDeduction = Number(slip.lop_deduction);
     const totalDeductions = pfEmployeeContribution + esic + incomeTax + lopDeduction;
 
-    const paidDays = daysInPayPeriod(slip.pay_period) - Number(slip.lop_days);
+    // payable_days already accounts for LOP and, for a joining month, for
+    // the days before the employee joined -- computed once in
+    // salarySlipService.js and never recomputed here.
+    const paidDays = Number(slip.payable_days);
 
     // --- Title -----------------------------------------------------------
     doc.font("Helvetica-Bold").fontSize(20).fillColor(INK).text("PAYSLIP", { align: "center" });
@@ -137,7 +131,7 @@ export function renderPayslipPdf(slip) {
     keyValue(doc, leftX, y, "Pay Period", formatPayPeriod(slip.pay_period));
     const summaryBottom = y + rowHeight;
 
-    const boxHeight = 76;
+    const boxHeight = 92;
     doc.roundedRect(rightX, summaryTop - 6, columnWidth, boxHeight, 4)
         .fillColor(ACCENT_BG)
         .fill()
@@ -153,6 +147,10 @@ export function renderPayslipPdf(slip) {
     });
     keyValue(doc, rightX + 12, summaryTop + 44, "Paid Days", paidDays, { labelWidth: 70, valueWidth: 60 });
     keyValue(doc, rightX + 12, summaryTop + 60, "LOP Days", slip.lop_days, { labelWidth: 70, valueWidth: 60 });
+    keyValue(doc, rightX + 12, summaryTop + 76, "Total Leave Days", slip.total_leave_days, {
+        labelWidth: 100,
+        valueWidth: 30,
+    });
 
     doc.y = Math.max(summaryBottom, summaryTop - 6 + boxHeight);
     doc.x = PAGE_MARGIN;
@@ -238,4 +236,24 @@ export function renderPayslipPdf(slip) {
 
     doc.end();
     return doc;
+}
+
+// Input: the same joined slip row renderPayslipPdf takes. Output: a promise
+// for the fully-rendered PDF as a Buffer. Failure mode: rejects if pdfkit
+// errors partway through the render.
+//
+// Exists because an email attachment needs the whole file up front, while the
+// HTTP download wants a stream it can pipe straight to the response without
+// buffering — so this collects, rather than replacing, the streaming version.
+// A payslip is a single A4 page (tens of KB), so holding one in memory is
+// nothing; a payroll run collects them one at a time (see
+// salarySlipService.js) rather than all 200 at once.
+export function renderPayslipPdfBuffer(slip) {
+    return new Promise((resolve, reject) => {
+        const doc = renderPayslipPdf(slip);
+        const chunks = [];
+        doc.on("data", (chunk) => chunks.push(chunk));
+        doc.on("end", () => resolve(Buffer.concat(chunks)));
+        doc.on("error", reject);
+    });
 }

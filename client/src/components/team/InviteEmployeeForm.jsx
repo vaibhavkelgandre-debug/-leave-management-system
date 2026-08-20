@@ -14,7 +14,11 @@ const inputClasses =
     "block w-full rounded-md border border-slate-300 px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500";
 const labelClasses = "mb-1 block text-sm font-medium text-slate-700";
 
-export function InviteEmployeeForm({ onInvited }) {
+// `secondaryAction`: an optional node (e.g. a "Back"/"Cancel" link) rendered
+// next to the Invite button itself, right-aligned, rather than stacked
+// full-width below the form — AddEmployeePage.jsx uses this so both actions
+// sit in one compact row instead of each spanning the form's full width.
+export function InviteEmployeeForm({ onInvited, secondaryAction }) {
     const { user: currentUser } = useAuth();
     // Only needed to populate the manager dropdown — null until loaded so no
     // setState happens synchronously inside the effect.
@@ -118,7 +122,8 @@ export function InviteEmployeeForm({ onInvited }) {
     return (
         <div>
             <p className="text-sm text-slate-500">
-                They'll get a link to set their own password. Nothing is emailed — share the link yourself.
+                We'll email them a single-use link to set their own password. It expires within hours, so invite
+                them when they're ready to start.
             </p>
 
             <form onSubmit={handleInvite} className="mt-4 space-y-4">
@@ -128,102 +133,158 @@ export function InviteEmployeeForm({ onInvited }) {
                     </p>
                 )}
 
-                <div>
-                    <label htmlFor="firstName" className={labelClasses}>
-                        First name
-                    </label>
-                    <input
-                        id="firstName"
-                        name="firstName"
-                        value={form.firstName}
-                        onChange={handleChange}
-                        required
-                        className={inputClasses}
-                    />
+                {/* A horizontal grid, not one field per row — with only 5
+                    fields this fits in two compact rows on anything wider
+                    than a phone, so the Invite button stays visible without
+                    scrolling instead of trailing a long vertical stack. */}
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                        <label htmlFor="firstName" className={labelClasses}>
+                            First name
+                        </label>
+                        <input
+                            id="firstName"
+                            name="firstName"
+                            value={form.firstName}
+                            onChange={handleChange}
+                            required
+                            className={inputClasses}
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="lastName" className={labelClasses}>
+                            Last name
+                        </label>
+                        <input
+                            id="lastName"
+                            name="lastName"
+                            value={form.lastName}
+                            onChange={handleChange}
+                            required
+                            className={inputClasses}
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="email" className={labelClasses}>
+                            Email
+                        </label>
+                        <input
+                            id="email"
+                            name="email"
+                            type="email"
+                            value={form.email}
+                            onChange={handleChange}
+                            required
+                            className={inputClasses}
+                        />
+                    </div>
+
+                    <div>
+                        <label htmlFor="role" className={labelClasses}>
+                            Role
+                        </label>
+                        <select
+                            id="role"
+                            name="role"
+                            value={form.role}
+                            onChange={handleChange}
+                            className={inputClasses}
+                        >
+                            <option value={ROLES.EMPLOYEE}>Employee</option>
+                            <option value={ROLES.MANAGER}>Manager</option>
+                            <option value={ROLES.HR_ADMIN}>HR Admin</option>
+                        </select>
+                    </div>
+
+                    <div className="sm:col-span-2">
+                        <label htmlFor="managerId" className={labelClasses}>
+                            {reportingLabel}
+                        </label>
+                        <ManagerSelect
+                            id="managerId"
+                            label={reportingLabel}
+                            value={form.managerId}
+                            onChange={(event) => setForm((prev) => ({ ...prev, managerId: event.target.value }))}
+                            options={reportingOptions}
+                            targetRole={form.role}
+                            allowNone={false}
+                            required
+                            currentUserId={currentUser.id}
+                        />
+                    </div>
                 </div>
 
-                <div>
-                    <label htmlFor="lastName" className={labelClasses}>
-                        Last name
-                    </label>
-                    <input
-                        id="lastName"
-                        name="lastName"
-                        value={form.lastName}
-                        onChange={handleChange}
-                        required
-                        className={inputClasses}
-                    />
+                {/* Right-aligned, content-sized buttons — not stretched to
+                    match the input fields above, same weight as any other
+                    form's action row in this app (e.g. PayrollRunForm.jsx). */}
+                <div className="flex items-center justify-end gap-2 pt-2">
+                    {secondaryAction}
+                    <Button type="submit" loading={submitting}>
+                        Invite
+                    </Button>
                 </div>
-
-                <div>
-                    <label htmlFor="email" className={labelClasses}>
-                        Email
-                    </label>
-                    <input
-                        id="email"
-                        name="email"
-                        type="email"
-                        value={form.email}
-                        onChange={handleChange}
-                        required
-                        className={inputClasses}
-                    />
-                </div>
-
-                <div>
-                    <label htmlFor="role" className={labelClasses}>
-                        Role
-                    </label>
-                    <select id="role" name="role" value={form.role} onChange={handleChange} className={inputClasses}>
-                        <option value={ROLES.EMPLOYEE}>Employee</option>
-                        <option value={ROLES.MANAGER}>Manager</option>
-                        <option value={ROLES.HR_ADMIN}>HR Admin</option>
-                    </select>
-                </div>
-
-                <div>
-                    <label htmlFor="managerId" className={labelClasses}>
-                        {reportingLabel}
-                    </label>
-                    <ManagerSelect
-                        id="managerId"
-                        label={reportingLabel}
-                        value={form.managerId}
-                        onChange={(event) => setForm((prev) => ({ ...prev, managerId: event.target.value }))}
-                        options={reportingOptions}
-                        targetRole={form.role}
-                        allowNone={false}
-                        required
-                        currentUserId={currentUser.id}
-                    />
-                </div>
-
-                <Button type="submit" loading={submitting} className="w-full">
-                    Invite
-                </Button>
             </form>
 
+            {/* Two shapes, deliberately not one: when the email went out, the
+                link is a fallback and is shown as such (small, secondary);
+                when it didn't — SMTP unconfigured, the flow switched off via
+                MAIL_FEATURE_EMPLOYEE_INVITE, or a send failure — the link is
+                the *only* way to onboard this person, so it's promoted back to
+                the headline with a warning that nothing was sent. Server-side
+                `emailSent` decides, since only the server knows which of those
+                happened. */}
             {inviteResult && (
-                <div className="mt-6 rounded-md bg-green-50 px-3 py-3 text-sm text-green-800">
-                    <p className="font-medium">Invited. Share this link with them:</p>
-                    <div className="mt-2 flex items-center gap-2">
-                        <code className="block flex-1 break-all rounded bg-white/70 px-2 py-1.5 text-xs">
-                            {inviteResult.inviteLink}
-                        </code>
-                        <Button
-                            type="button"
-                            variant="secondary"
-                            size="sm"
-                            icon={copied ? Check : Copy}
-                            onClick={handleCopyLink}
-                        >
-                            {copied ? "Copied" : "Copy"}
-                        </Button>
-                    </div>
-                    <p className="mt-3 text-xs text-green-700">
-                        Open it in a private window — following it in this browser would sign you in as them.
+                <div
+                    className={`mt-6 rounded-md px-3 py-3 text-sm ${
+                        inviteResult.emailSent ? "bg-green-50 text-green-800" : "bg-amber-50 text-amber-900"
+                    }`}
+                >
+                    <p className="font-medium">
+                        {inviteResult.emailSent
+                            ? `Invited. We emailed the link to ${inviteResult.user?.email ?? "them"}.`
+                            : "Invited, but the email wasn't sent — share this link with them yourself:"}
                     </p>
+                    {inviteResult.inviteLink ? (
+                        <>
+                            {inviteResult.emailSent && (
+                                <p className="mt-2 text-xs text-green-700">
+                                    If it doesn't arrive, share this link instead:
+                                </p>
+                            )}
+                            <div className="mt-2 flex items-center gap-2">
+                                <code className="block flex-1 break-all rounded bg-white/70 px-2 py-1.5 text-xs">
+                                    {inviteResult.inviteLink}
+                                </code>
+                                <Button
+                                    type="button"
+                                    variant="secondary"
+                                    size="sm"
+                                    icon={copied ? Check : Copy}
+                                    onClick={handleCopyLink}
+                                >
+                                    {copied ? "Copied" : "Copy"}
+                                </Button>
+                            </div>
+                            <p
+                                className={`mt-3 text-xs ${
+                                    inviteResult.emailSent ? "text-green-700" : "text-amber-800"
+                                }`}
+                            >
+                                Open it in a private window — following it in this browser would sign you in as
+                                them.
+                            </p>
+                        </>
+                    ) : (
+                        // No link at all means the server couldn't build one
+                        // (CLIENT_BASE_URL unset) — there's nothing to copy,
+                        // and saying so beats rendering an empty code block.
+                        <p className="mt-2 text-xs">
+                            The invite link couldn't be built on the server. Ask an administrator to check the
+                            deployment's client URL setting, then invite them again.
+                        </p>
+                    )}
                 </div>
             )}
         </div>

@@ -199,6 +199,53 @@ describe("InviteEmployeeForm", () => {
         expect(onInvited).toHaveBeenCalledTimes(1);
     });
 
+    // The link is emailed now, so the success panel has two shapes and the
+    // server's `emailSent` picks between them — the failure shape is what the
+    // test above already exercises (its mock omits the flag, as an older
+    // server or a failed send would).
+    it("confirms the invite was emailed, keeping the link as a fallback", async () => {
+        userService.getUsers.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
+        userService.inviteEmployee.mockResolvedValue({
+            user: makeUser({ id: "new-1", email: "new@example.com" }),
+            inviteLink: "http://localhost:5173/invite/abc123",
+            emailSent: true,
+        });
+
+        renderForm();
+        await screen.findByLabelText(/first name/i);
+
+        await userEvent.type(screen.getByLabelText(/first name/i), "New");
+        await userEvent.type(screen.getByLabelText(/last name/i), "Hire");
+        await userEvent.type(screen.getByLabelText(/email/i), "new@example.com");
+        await userEvent.selectOptions(screen.getByLabelText(/manager/i), "mgr-1");
+        await userEvent.click(screen.getByRole("button", { name: /^invite$/i }));
+
+        expect(await screen.findByText(/we emailed the link to new@example.com/i)).toBeInTheDocument();
+        // Still copyable — the fallback for an email that never lands.
+        expect(screen.getByText(/abc123/)).toBeInTheDocument();
+    });
+
+    it("warns when the server couldn't build an invite link at all", async () => {
+        userService.getUsers.mockResolvedValue([makeUser({ id: "mgr-1", role: ROLES.MANAGER })]);
+        userService.inviteEmployee.mockResolvedValue({
+            user: makeUser({ id: "new-1" }),
+            inviteLink: null,
+            emailSent: false,
+        });
+
+        renderForm();
+        await screen.findByLabelText(/first name/i);
+
+        await userEvent.type(screen.getByLabelText(/first name/i), "New");
+        await userEvent.type(screen.getByLabelText(/last name/i), "Hire");
+        await userEvent.type(screen.getByLabelText(/email/i), "new@example.com");
+        await userEvent.selectOptions(screen.getByLabelText(/manager/i), "mgr-1");
+        await userEvent.click(screen.getByRole("button", { name: /^invite$/i }));
+
+        expect(await screen.findByText(/invite link couldn't be built/i)).toBeInTheDocument();
+        expect(screen.queryByRole("button", { name: /copy/i })).not.toBeInTheDocument();
+    });
+
     it("copies the invite link to the clipboard", async () => {
         // Includes the inviter's own HR record — findAllUsers() always would
         // in real data, and the HR-admin reporting-line picker defaults to

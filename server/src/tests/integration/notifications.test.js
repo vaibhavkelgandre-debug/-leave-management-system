@@ -20,8 +20,8 @@ import { sweepDelegationTransitions } from "../../services/notificationSweepServ
 import { todayDateKey, addDaysToDateKey } from "../../utils/dates.js";
 import { formatPayPeriod } from "../../utils/payPeriod.js";
 
-// salary-slips confirm now rejects a pay period that hasn't started yet
-// (see assertPeriodStarted in salarySlipService.js), so these tests need a
+// salary-slips confirm now rejects a pay period that hasn't fully ended yet
+// (see assertPeriodCompleted in salarySlipService.js), so these tests need a
 // period relative to "now" rather than a hardcoded literal.
 function monthsAgo(offset) {
     const now = new Date();
@@ -397,7 +397,7 @@ describe("Notification triggers", () => {
         );
     });
 
-    it("notifies the assigned manager when a new employee is invited, and the inviting HR once the invite is accepted", async () => {
+    it("notifies the assigned manager when a new employee is invited, the inviting HR once the invite is accepted, and the new employee themself to complete their profile", async () => {
         const hr = await createRootHr({ email: "notif-invite-hr@example.com" });
         const manager = await createUser({ role: "MANAGER", email: "notif-invite-mgr@example.com", managerId: hr.id });
         const hrAgent = await loginAs(hr);
@@ -425,6 +425,13 @@ describe("Notification triggers", () => {
         const hrNotifications = (await hrAgent.get("/api/notifications")).body.data.notifications;
         const inviteAccepted = hrNotifications.find((n) => n.type === "INVITE_ACCEPTED");
         expect(inviteAccepted.message).toBe("New Hire has accepted their invite and joined");
+
+        const newHireAgent = await loginAs(acceptResponse.body.data.user, "NewPassword123!");
+        const newHireNotifications = (await newHireAgent.get("/api/notifications")).body.data.notifications;
+        const profileCreated = newHireNotifications.find((n) => n.type === "PROFILE_CREATED");
+        expect(profileCreated.message).toBe(
+            "Profile successfully created. Please complete your profile details and upload your mandatory documents, then submit them to HR for verification."
+        );
     });
 
     it("notifies the manager when a delegation's window starts or ends today, deduping a repeat sweep", async () => {

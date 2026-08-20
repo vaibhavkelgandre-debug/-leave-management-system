@@ -21,12 +21,14 @@ function daysInMonth(payPeriod) {
     return new Date(year, month, 0).getDate();
 }
 
-// Every test below needs a pay period that has already started (see
-// assertPeriodStarted in salarySlipService.js) — computed relative to "now"
-// rather than a hardcoded literal, so this suite doesn't quietly start
-// failing once real time catches up to whatever year was hardcoded. Each
-// call site uses a distinct offset purely so slips from different tests
-// never share a (employee_id, pay_period) key by coincidence.
+// Every test below (other than the ones specifically testing the boundary)
+// needs a pay period that has already fully ended (see assertPeriodCompleted
+// in salarySlipService.js) — computed relative to "now" rather than a
+// hardcoded literal, so this suite doesn't quietly start failing once real
+// time catches up to whatever year was hardcoded. Each call site uses a
+// distinct offset purely so slips from different tests never share a
+// (employee_id, pay_period) key by coincidence. Offset 0 is always the
+// current, still-running month -- never used for a success-path test.
 function monthsAgo(offset) {
     const now = new Date();
     const d = new Date(now.getFullYear(), now.getMonth() - offset, 1);
@@ -200,7 +202,7 @@ describe("Salary slips (calculated payroll)", () => {
         expect(confirmResponse.statusCode).toBe(400);
     });
 
-    it("allows generating payroll mid-month, for the current period that has started but not finished", async () => {
+    it("rejects calculate and confirm for the current month, which hasn't fully ended yet", async () => {
         const hr = await createRootHr({ email: "slip-current-hr@example.com" });
         const employee = await createUser({ email: "slip-current-emp@example.com", managerId: hr.id });
         await verifyEmployeeProfile(employee.id, hr.id);
@@ -208,9 +210,11 @@ describe("Salary slips (calculated payroll)", () => {
         const agent = await loginAs(hr);
         const currentPeriod = monthsAgo(0);
 
-        const response = await agent.post("/api/salary-slips/confirm").send({ payPeriod: currentPeriod });
-        expect(response.statusCode).toBe(200);
-        expect(response.body.data.committed).toHaveLength(1);
+        const calcResponse = await agent.post("/api/salary-slips/calculate").send({ payPeriod: currentPeriod });
+        expect(calcResponse.statusCode).toBe(400);
+
+        const confirmResponse = await agent.post("/api/salary-slips/confirm").send({ payPeriod: currentPeriod });
+        expect(confirmResponse.statusCode).toBe(400);
     });
 
     it("scopes payroll to the acting HR admin's own subtree", async () => {
@@ -425,5 +429,96 @@ describe("Salary slips (calculated payroll)", () => {
         // inject an arbitrary Content-Disposition.
         const bogusResponse = await employeeAgent.get(`/api/salary-slips/${slipId}/pdf?disposition=whatever`);
         expect(bogusResponse.headers["content-disposition"]).toMatch(/^attachment;/);
+    });
+
+    it("skips an employee whose joining date falls entirely after the pay period, without failing the run", async () => {
+        const hr = await createRootHr({ email: "slip-prejoin-hr@example.com" });
+        const employee = await createUser({ email: "slip-prejoin-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const payPeriod = monthsAgo(16);
+        const periodEnd = new Date(`${payPeriod}-${String(daysInMonth(payPeriod)).padStart(2, "0")}T00:00:00Z`);
+        periodEnd.setUTCDate(periodEnd.getUTCDate() + 1);
+        const joiningDate = periodEnd.toISOString().slice(0, 10);
+        await pool.query("UPDATE users SET joining_date = $1 WHERE id = $2", [joiningDate, employee.id]);
+
+        const agent = await loginAs(hr);
+        const response = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
+
+        const row = response.body.data.rows.find((r) => r.employeeId === employee.id);
+        expect(row.status).toBe("skipped");
+        expect(row.skipReason).toMatch(/not yet joined/i);
+    });
+
+    it("pro-rates earnings for an employee who joined partway through the pay period, dividing by the full month but paying only for days actually employed", async () => {
+        const hr = await createRootHr({ email: "slip-prorate-hr@example.com" });
+        const employee = await createUser({ email: "slip-prorate-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const payPeriod = monthsAgo(17);
+        const totalDays = daysInMonth(payPeriod);
+        const joinDay = 16;
+        const joiningDate = `${payPeriod}-${String(joinDay).padStart(2, "0")}`;
+        await pool.query("UPDATE users SET joining_date = $1 WHERE id = $2", [joiningDate, employee.id]);
+
+        const agent = await loginAs(hr);
+        const response = await agent.post("/api/salary-slips/calculate").send({ payPeriod });
+        const row = response.body.data.rows.find((r) => r.employeeId === employee.id);
+
+        const daysEmployed = totalDays - joinDay + 1;
+        const perDayRate = (30000 + 12000 + 5000) / totalDays;
+        const preJoiningDeduction = Math.round(perDayRate * (totalDays - daysEmployed) * 100) / 100;
+        const expectedNetPay = Math.round((30000 + 12000 + 5000 - 1800 - 0 - 0 - 0 - preJoiningDeduction) * 100) / 100;
+
+        expect(row.status).toBe("ok");
+        expect(row.computed.lopDays).toBe(0);
+        expect(row.computed.payableDays).toBe(daysEmployed);
+        expect(row.computed.netPay).toBe(expectedNetPay);
+        // Full-month pay would be strictly higher -- this is the actual gap
+        // the pro-ration closes, not just a formula that happens to differ.
+        expect(row.computed.netPay).toBeLessThan(30000 + 12000 + 5000 - 1800 - 0 - 0);
+    });
+
+    it("reports total leave days as a superset of the LOP-only figure when both a LOP and a non-LOP leave type were taken", async () => {
+        const hr = await createRootHr({ email: "slip-totalleave-hr@example.com" });
+        const employee = await createUser({ email: "slip-totalleave-emp@example.com", managerId: hr.id });
+        await verifyEmployeeProfile(employee.id, hr.id);
+        await createSalaryStructure({ employeeId: employee.id, actorId: hr.id });
+        const payPeriod = monthsAgo(18);
+
+        const lopType = await createLeaveType({ name: `LOP Leave ${payPeriod}`, countsAsLop: true });
+        const paidType = await createLeaveType({ name: `Paid Leave ${payPeriod}`, countsAsLop: false });
+
+        const lopDay = firstWeekdayOf(payPeriod);
+        const [year, month] = payPeriod.split("-").map(Number);
+        const secondDay = new Date(year, month - 1, 1);
+        secondDay.setDate(secondDay.getDate() + 7);
+        while (secondDay.getDay() === 0 || secondDay.getDay() === 6) {
+            secondDay.setDate(secondDay.getDate() + 1);
+        }
+        const paidDay = `${payPeriod}-${String(secondDay.getDate()).padStart(2, "0")}`;
+
+        const lopRequest = await createLeaveRequest({
+            employeeId: employee.id,
+            leaveTypeId: lopType.id,
+            startDate: lopDay,
+            endDate: lopDay,
+        });
+        const paidRequest = await createLeaveRequest({
+            employeeId: employee.id,
+            leaveTypeId: paidType.id,
+            startDate: paidDay,
+            endDate: paidDay,
+        });
+
+        const hrAgent = await loginAs(hr);
+        await hrAgent.post(`/api/leave-requests/${lopRequest.id}/approve`).send({});
+        await hrAgent.post(`/api/leave-requests/${paidRequest.id}/approve`).send({});
+
+        const response = await hrAgent.post("/api/salary-slips/calculate").send({ payPeriod });
+        const row = response.body.data.rows.find((r) => r.employeeId === employee.id);
+
+        expect(row.computed.lopDays).toBe(1);
+        expect(row.computed.totalLeaveDays).toBe(2);
     });
 });

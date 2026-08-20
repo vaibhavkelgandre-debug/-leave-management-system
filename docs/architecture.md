@@ -501,7 +501,7 @@ Every module actually present in the codebase, cross-referenced to its full trac
 - **Delegation** → Part 13's delegate sub-trace.
 - **Authentication** → Part 8.
 - **HR dashboard / reporting (CSV)** → traced below (Part 10a).
-- **Notifications** → **Not found in the current codebase.** Nothing sends an email/SMS/push notification anywhere — invite links and password-reset links are logged to the console in non-production and shown directly in the UI (`inviteResult.inviteLink`), matching the brief's explicit "real email delivery is out of scope" instruction.
+- **Notifications** → in-app (`notifications` table + bell) for everything, plus **three** outbound email paths, all going through `config/mailer.js` (nodemailer/SMTP) and each individually switchable via `config/mailFeatures.js`: the **password-reset link** (the only flow with no alternative delivery — returning the link in an API response would let anyone reset anyone's password), the **invite link** (also still returned to HR as a fallback, so this one degrades rather than breaks when mail is off), and the **payslip PDF** after a confirmed payroll run (attached, so it previews and downloads inside the mail client; the in-app notification and the download endpoint remain the non-email path). No SMS or push anywhere.
 - **Calendar** → `MyLeaveCalendar`/`TeamLeaveCalendar`/`HolidayCalendar`, all FullCalendar-backed, fed by whichever list the host page already fetched — no separate calendar API exists.
 
 ### Part 10a — HR reporting/CSV workflow
@@ -604,10 +604,13 @@ Logic (in order):
   5. generateSecureToken() — crypto.randomBytes(32).toString("base64url") as the raw token, plus
      its SHA-256 hash; ONLY THE HASH IS PERSISTED.
   6. insertInvitation({userId, tokenHash, invitedBy, expiresAt}) — expiresAt = now + INVITE_TOKEN_TTL_HOURS
-     (default 24h, env-configurable).
-  7. Builds inviteLink = `${CLIENT_BASE_URL}/invite/${rawToken}` — logs it to console outside
-     production (no real email delivery — matches the brief's explicit scope).
-  8. Returns { user, inviteLink }.
+     (default 12h, env-configurable, clamped to 1-72h).
+  7. Builds inviteLink = `${CLIENT_BASE_URL}/invite/${rawToken}` (null if CLIENT_BASE_URL is unset) —
+     logs it to console outside production.
+  8. sendEmployeeInviteEmail(...) — awaited (no enumeration concern: the caller is the HR admin who
+     just created this account), wrapped in try/catch. A send failure is logged and reported as
+     emailSent:false, never thrown: everything above is already committed.
+  9. Returns { user, inviteLink, emailSent, expiresAt }.
 ```
 
 ### Step 8 — What database operation happens?
@@ -666,7 +669,7 @@ In every case, `InviteEmployeeForm.jsx` catches the error and calls `toErrorMess
 
 ### Interview-ready answer
 
-> "Adding an employee is a two-step, invite-then-accept flow, not direct account creation. HR fills out a form on `EmployeesPage`, which POSTs to `/api/users/invite` — that endpoint is `requireRole("HR_ADMIN")`-gated, and a Zod schema enforces that an `EMPLOYEE` or `HR_ADMIN` role must come with a `managerId`, while a `MANAGER` doesn't need one. The service layer creates the `users` row immediately, but in an `INVITED` state with no password — it's a real row, just an unusable one — then seeds a leave-balance row for every active leave type so the person's balances aren't empty on day one. It generates a random token, stores only its SHA-256 hash in an `invitations` table, and returns the raw token embedded in a link, which since there's no real email integration in scope, we just show directly in the UI with a copy button. When the employee opens that link, `AcceptInvitePage` verifies the token's still valid and unexpired, lets them set a password, and the accept endpoint hashes it with bcrypt, flips the user to `ACTIVE`, marks the invite used, and — this is the part I like — logs them in immediately by setting the auth cookie in that same response, so there's no separate login step after accepting. If the link's expired, the pending row actually gets deleted on the next `GET /api/users` call, specifically so the email frees up for a re-invite, since `email` is a unique column."
+> "Adding an employee is a two-step, invite-then-accept flow, not direct account creation. HR fills out a form on `EmployeesPage`, which POSTs to `/api/users/invite` — that endpoint is `requireRole("HR_ADMIN")`-gated, and a Zod schema enforces that an `EMPLOYEE` or `HR_ADMIN` role must come with a `managerId`, while a `MANAGER` doesn't need one. The service layer creates the `users` row immediately, but in an `INVITED` state with no password — it's a real row, just an unusable one — then seeds a leave-balance row for every active leave type so the person's balances aren't empty on day one. It generates a random token, stores only its SHA-256 hash in an `invitations` table, and emails the raw token embedded in a link to the invitee — with a 12-hour, single-use window, since a link sitting in an inbox is a credential — while still showing HR the same link with a copy button as a fallback for when mail is unconfigured or fails. When the employee opens that link, `AcceptInvitePage` verifies the token's still valid and unexpired, lets them set a password, and the accept endpoint hashes it with bcrypt, flips the user to `ACTIVE`, marks the invite used, and — this is the part I like — logs them in immediately by setting the auth cookie in that same response, so there's no separate login step after accepting. If the link's expired, the pending row actually gets deleted on the next `GET /api/users` call, specifically so the email frees up for a re-invite, since `email` is a unique column."
 
 ---
 
@@ -1441,10 +1444,10 @@ Nearly every service (authService, userService, invitationService, leaveRequestS
 
 | Severity | Finding | Detail |
 |---|---|---|
-| **HIGH** | No rate limiting anywhere | Confirmed absent by grep and by `package.json` dependency list — login, password-reset-request, and the HR-registration-code endpoint have zero brute-force/credential-stuffing protection. The timing-safe comparison on the registration code is undermined by having no attempt-throttling in front of it at all. |
+| **HIGH** | No IP-level rate limiting anywhere | Confirmed absent by grep and by `package.json` dependency list — login and the HR-registration-code endpoint have zero brute-force/credential-stuffing protection. The timing-safe comparison on the registration code is undermined by having no attempt-throttling in front of it at all. `password-reset/request` now has a **per-account** 15-minute cooldown enforced in SQL (`issuePasswordReset`), which caps mail-bombing and quota burn against any one address — but it is keyed on `user_id`, so an attacker cycling many known addresses is still unthrottled. That needs IP-level limiting, which remains unaddressed. |
 | **MEDIUM** | No database transactions | Multi-step writes (e.g. `decideLeaveRequest`'s status update + ledger insert + audit insert) are three independent, non-atomic `pool.query` calls — a crash or connection drop between them leaves the ledger/audit trail out of sync with the request's actual status, with no rollback. |
 | **LOW** | No explicit JWT `algorithms` allowlist on verify | `jwt.verify(token, secret)` without pinning `algorithms:["HS256"]` — not exploitable today with a fixed symmetric secret, but missing defense-in-depth. |
-| **LOW** | Raw invite/password-reset tokens logged to console outside production | Deliberate dev-mode stand-in for real email delivery, explicitly gated by `NODE_ENV !== "production"` — but any non-production environment's logs (including a shared `staging` env, if one existed) would contain live, usable tokens in plaintext. |
+| **LOW** | Raw invite tokens logged to console outside production | Deliberate dev-mode stand-in for real email delivery, explicitly gated by `NODE_ENV !== "production"` — but any non-production environment's logs (including a shared `staging` env, if one existed) would contain live, usable tokens in plaintext. **Password-reset links are no longer in scope for this finding**: they're emailed now, and only fall back to a console log when SMTP is unconfigured (never in a configured production environment). The reset path also deliberately keeps the link out of its failure logs, since it's a live credential. |
 | **LOW** | Polyglot file risk (theoretical) | Magic-byte sniffing only inspects the first bytes; a file with a valid PDF header followed by other embedded content would pass. Neutralized in practice by private storage + forced download + server-controlled Content-Type, but worth naming as an inherent limit of signature-based detection rather than a bug. |
 | **LOW** | No `methods`/`allowedHeaders` restriction on CORS | The origin allowlist is what actually matters given `credentials:true`; the missing method/header restriction is a minor hardening gap, not a live exposure. |
 
@@ -1453,7 +1456,7 @@ Nearly every service (authService, userService, invitationService, leaveRequestS
 1. Add `express-rate-limit` (or equivalent) to `/api/auth/login`, `/api/auth/password-reset/request`, and `/api/auth/register/hr` at minimum — this is the single highest-value security improvement available given everything else already implemented correctly.
 2. Wrap `decideLeaveRequest`'s three writes (and `submitLeaveRequest`'s insert+ledger+audit sequence) in an explicit Postgres transaction (`BEGIN`/`COMMIT`/`ROLLBACK` via a checked-out client, not the shared pool) so a partial failure can't desynchronize the ledger from the request's actual status.
 3. Pin `jwt.verify`'s `algorithms` option explicitly.
-4. If a staging/shared non-production environment is ever introduced, swap the console-logged invite/reset links for a real (even sandboxed) email provider before that environment holds real accounts.
+4. ~~If a staging/shared non-production environment is ever introduced, swap the console-logged invite/reset links for a real (even sandboxed) email provider before that environment holds real accounts.~~ **Done for password reset** (`config/mailer.js` + `services/mailService.js`, nodemailer/SMTP). Still outstanding for **invite** links, which remain console-logged/UI-returned; the mail service is deliberately built to be reused for them.
 
 ---
 

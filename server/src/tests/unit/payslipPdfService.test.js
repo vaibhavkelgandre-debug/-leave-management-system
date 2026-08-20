@@ -36,6 +36,8 @@ const baseSlip = {
     income_tax: "0.00",
     lop_days: "0.0",
     lop_deduction: "0.00",
+    total_leave_days: "0.0",
+    payable_days: "31.0",
     net_pay: "45200.00",
 };
 
@@ -60,7 +62,25 @@ describe("renderPayslipPdf", () => {
     });
 
     it("still renders when the employee took loss-of-pay days", async () => {
-        const slip = { ...baseSlip, lop_days: "1.5", lop_deduction: "2250.00", net_pay: "42950.00" };
+        const slip = {
+            ...baseSlip,
+            lop_days: "1.5",
+            lop_deduction: "2250.00",
+            total_leave_days: "1.5",
+            payable_days: "29.5",
+            net_pay: "42950.00",
+        };
+        const buffer = await collectStream(renderPayslipPdf(slip));
+        expect(buffer.subarray(0, 5).toString("ascii")).toBe("%PDF-");
+    });
+
+    it("still renders when the employee joined partway through the period (fewer payable days than the month)", async () => {
+        const slip = {
+            ...baseSlip,
+            employee_joining_date: "2027-05-16",
+            total_leave_days: "0.0",
+            payable_days: "16.0",
+        };
         const buffer = await collectStream(renderPayslipPdf(slip));
         expect(buffer.subarray(0, 5).toString("ascii")).toBe("%PDF-");
     });
