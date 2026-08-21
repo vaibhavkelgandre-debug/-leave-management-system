@@ -205,6 +205,17 @@ describe("baseline", () => {
         expect(await applyPending({ pool, dir, table, log: silent })).toEqual([]);
     });
 
+    it("reports rather than fails when a dry run finds the ledger already populated", async () => {
+        writeMigration("001_a.sql", migrationCreating(`zz_mig_already_${uniqueSuffix()}`));
+        await applyPending({ pool, dir, table, log: silent });
+
+        // A dry run changes nothing, so "already baselined" is information, not
+        // an error — it must not exit non-zero and send someone debugging.
+        const lines = [];
+        await expect(baseline({ pool, dir, table, log: (line) => lines.push(line) })).resolves.toEqual([]);
+        expect(lines.join(" ")).toMatch(/already baselined/i);
+    });
+
     it("refuses when the ledger already has rows", async () => {
         writeMigration("001_a.sql", migrationCreating(`zz_mig_twice_${uniqueSuffix()}`));
         await applyPending({ pool, dir, table, log: silent });

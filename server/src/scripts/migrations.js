@@ -197,6 +197,17 @@ export async function baseline({ pool, dir, table = DEFAULT_TABLE, apply = false
 
         const existing = await appliedChecksums(client, table);
         if (existing.size) {
+            // Only the writing form is an error. A dry run changes nothing, so
+            // "you already did this" is information, not a failure — reporting
+            // it as one sends someone hunting for a problem that isn't there,
+            // which is exactly what happened the first time this shipped.
+            if (!apply) {
+                log(
+                    `Already baselined — ${table} records ${existing.size} migration(s), so there is nothing to ` +
+                        `baseline. Use the status command to see what's applied or pending.`
+                );
+                return [];
+            }
             throw new Error(
                 `Refusing to baseline: ${table} already records ${existing.size} migration(s). ` +
                     `Baselining is a one-time step for a database that predates the ledger. If this database ` +
