@@ -6,7 +6,7 @@
 
 ## 📌 Keep this file in sync
 
-> **Rule:** Whenever a new file is added to `server/src/sql/`, update this document in the same change — new/changed tables in the diagram and table breakdown below, and move anything from "🔮 Planned" to "✅ Live" once it's actually built. This is also logged in [`.claude/rules.md`](../.claude/rules.md) under Database Rules.
+> **Rule:** Whenever a new file is added to `server/src/sql/`, update this document in the same change — new/changed tables in the diagram and table breakdown below, and move anything from "🔮 Planned" to "✅ Live" once it's actually built. This is also logged in [`.claude/rules.md`](../../.claude/rules.md) under Database Rules.
 
 ---
 

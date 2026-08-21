@@ -52,7 +52,7 @@ Every mutating call site follows: `setBusy(true) / setError(null)` → `try { aw
 
 ## Part 15 — API Documentation Map
 
-The full endpoint-by-endpoint reference (request/response shapes, every error case) already lives in [`docs/2.api_documentation.md`](2.api_documentation.md) — this is the condensed index.
+The full endpoint-by-endpoint reference (request/response shapes, every error case) already lives in [`docs/2.api_documentation.md`](../2.api_documentation/README.md) — this is the condensed index.
 
 | Method | Endpoint | Auth | Role | Controller | Service |
 |---|---|---|---|---|---|

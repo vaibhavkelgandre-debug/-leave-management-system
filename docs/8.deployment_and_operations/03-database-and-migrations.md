@@ -109,7 +109,7 @@ unless `036` ran.
 2. Write it replay-safe by convention (`IF NOT EXISTS`, `DROP CONSTRAINT IF EXISTS` before `ADD`, `ON CONFLICT DO
    NOTHING` on seeds). No longer strictly required now the ledger exists, but it keeps baselining and hand-recovery
    forgiving.
-3. Update [`docs/3.db.md`](../3.db.md) — a standing rule.
+3. Update [`docs/3.db.md`](../3.db/README.md) — a standing rule.
 4. Apply to **dev**, **`_test`** (backend tests run against the real schema and will fail without it), and
    **production**.
 

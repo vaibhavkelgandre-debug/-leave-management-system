@@ -4,8 +4,8 @@
 > workflow executes end to end, what's tested, what isn't, and how to defend every design decision.
 >
 > **Source-of-truth ranking**: if this reference disagrees with the code, the code wins. If it disagrees with
-> [`1.functional_requirements.md`](../1.functional_requirements.md), [`2.api_documentation.md`](../2.api_documentation.md),
-> [`3.db.md`](../3.db.md), [`4.non_functional_requirements.md`](../4.non_functional_requirements.md) or
+> [`1.functional_requirements.md`](../1.functional_requirements/README.md), [`2.api_documentation.md`](../2.api_documentation/README.md),
+> [`3.db.md`](../3.db/README.md), [`4.non_functional_requirements.md`](../4.non_functional_requirements.md) or
 > [`.claude/rules.md`](../../.claude/rules.md), those are the authoritative spec-level docs and this is the
 > code-level companion to them — it adds *how it's implemented*, not a competing account of *what it should do*.
 >

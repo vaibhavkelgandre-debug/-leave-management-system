@@ -6,7 +6,7 @@
 
 ## Module 3: Leave Requests & Approval Workflow
 
-> 📌 The authoritative, verbatim spec for this whole module lives in [`.claude/rules.md`](../.claude/rules.md) → "Module 3 — Requests and the Approval Workflow". The FRs below are the same requirements broken into individually-trackable checklist items; if the two ever seem to disagree, the rules.md spec wins.
+> 📌 The authoritative, verbatim spec for this whole module lives in [`.claude/rules.md`](../../.claude/rules.md) → "Module 3 — Requests and the Approval Workflow". The FRs below are the same requirements broken into individually-trackable checklist items; if the two ever seem to disagree, the rules.md spec wins.
 
 ### ✅ FR-011: Submit Leave Request
 

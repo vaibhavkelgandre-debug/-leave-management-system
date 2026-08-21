@@ -1,6 +1,6 @@
 # Leave Management System — Backend
 
-Node.js + Express + PostgreSQL (raw SQL via `pg`, no ORM). See [`.claude/rules.md`](../.claude/rules.md) for architecture/coding conventions and [`docs/2.api_documentation.md`](../docs/2.api_documentation.md) for the full API reference.
+Node.js + Express + PostgreSQL (raw SQL via `pg`, no ORM). See [`.claude/rules.md`](../.claude/rules.md) for architecture/coding conventions and [`docs/2.api_documentation.md`](../docs/2.api_documentation/README.md) for the full API reference.
 
 ## Prerequisites
 

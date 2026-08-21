@@ -90,7 +90,7 @@ HTTP 200 { success:true, message, data: <request> }
 
 ## Part 7 — Database Architecture
 
-Full column-level breakdown lives in [`docs/3.db.md`](3.db.md) — this section is the condensed relationship/rationale view.
+Full column-level breakdown lives in [`docs/3.db.md`](../3.db/README.md) — this section is the condensed relationship/rationale view.
 
 ```mermaid
 erDiagram

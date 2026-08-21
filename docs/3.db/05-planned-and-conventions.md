@@ -21,7 +21,7 @@ None currently outstanding — `leave_request_documents` (FR-012) was the last i
 ## 🧠 Design conventions used throughout
 
 - Every table's primary key is `UUID DEFAULT gen_random_uuid()` (`pgcrypto`, enabled in `001_enable_pgcrypto.sql`).
-- Every table has `created_at`; most also have `updated_at` (see [`.claude/rules.md`](../.claude/rules.md) → Database Rules).
+- Every table has `created_at`; most also have `updated_at` (see [`.claude/rules.md`](../../.claude/rules.md) → Database Rules).
 - "Soft" uniqueness (e.g. "only one *pending* invite per user") is modeled with a **partial unique index** (`WHERE accepted_at IS NULL`) rather than an application-only check — the database enforces it even under concurrent requests.
 - Case-insensitive uniqueness (email, leave type name) uses a unique index on `lower(column)`, since Postgres `UNIQUE` is case-sensitive by default.
 - Business-rule enums (`status`, `provider`, `accrual_type`) use a `VARCHAR` + `CHECK IN (...)` rather than a Postgres `ENUM` type, so adding a new value is a plain migration instead of an `ALTER TYPE`.
