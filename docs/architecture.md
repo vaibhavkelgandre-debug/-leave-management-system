@@ -1331,7 +1331,7 @@ Every mutating call site follows the same `try/catch/finally` shape; `toHttpErro
 
 **"How does frontend communicate with backend?"** — Axios + cookies (`withCredentials`), one `apiClient.js`, a consistent `{success,message,data}` envelope on every response.
 
-**"How is data stored?"** — Raw parameterized PostgreSQL, no ORM, one migration file per schema change, applied manually per environment (no migration-tracking table).
+**"How is data stored?"** — Raw parameterized PostgreSQL, no ORM, one migration file per schema change, applied manually per environment through a checksummed `schema_migrations` ledger, one transaction per file — deliberately not auto-run on deploy.
 
 **"How do you validate user input?"** — Zod schemas at the HTTP boundary (`validators/*.js`) for shape, then business-rule checks inside services (e.g. `assertManagerAllowed`) — never trusting the client for either.
 

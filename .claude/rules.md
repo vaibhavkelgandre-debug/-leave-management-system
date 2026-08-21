@@ -154,22 +154,35 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 - Use foreign keys where appropriate.
 - Every table needs `created_at` and `updated_at`.
 - Store SQL scripts in `src/sql`.
-- Migrations are numbered sequentially and **never edited after being applied** — except to make one *replay-safe*, which is the one permitted edit (see the runner note below).
+- Migrations are numbered sequentially and **never edited after being applied** — now enforced rather than merely asked for: the runner stores a SHA-256 of every applied file and refuses to run if one changed.
   Current latest is `037_index_leave_requests_for_browse_pagination.sql` → next migration must start at `038_...`.
 
 > ℹ️ **Holidays store a date range, not a single date.** `holidays` has `start_date`/`end_date` (both `NOT NULL`, `end_date >= start_date`), not a single `holiday_date` — this supports multi-day holidays (e.g. a 5-day Diwali). The API accepts `endDate` as optional and defaults it to `startDate` for single-day holidays. There's no DB-level uniqueness on dates anymore (ranges make exact-duplicate uniqueness meaningless); overlap between holidays is instead checked at the service layer (`holidayService.js` → `findOverlappingHoliday`) and rejected with a `409`, same status code as the old DB-constraint-driven duplicate check.
 
-> 🚨 **Every migration must be replay-safe, because the runner has no ledger.** `runMigrations.js` reads `src/sql/*.sql` in order and applies **all** of them on every run — there's no `schema_migrations` table, so nothing is skipped. A file that isn't idempotent therefore fails the *entire* run against an already-migrated database, and every later migration (including the one you just wrote) never gets applied. That's exactly what happened when `002_create_roles.sql`'s bare `CREATE TABLE roles` aborted the run with `relation "roles" already exists`, leaving migration 037 unapplied.
+> 🔖 **The runner keeps a ledger, so a run applies only what's new.** `schema_migrations` (filename, checksum, applied_at, duration_ms) is created by `runMigrations.js` itself — it can't be a migration file, since a migration that creates the ledger can't be recorded in the ledger it's creating. Three commands:
 >
-> The rules that make a file replay-safe, all of which now hold for every file in `src/sql/`:
-> - `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP … IF EXISTS`.
-> - Seed `INSERT`s carry `ON CONFLICT … DO NOTHING` (002/003 were fixed to match 034's existing shape).
-> - A constraint change is always `DROP CONSTRAINT IF EXISTS` **then** `ADD CONSTRAINT` — `ADD` alone fails on a duplicate name (018/019/027/028/029 already did this; 005 and 012 were fixed to).
-> - A `RENAME` can't be made idempotent with a clause, so guard it: `DO $$ BEGIN IF EXISTS (SELECT 1 FROM information_schema.columns WHERE …) THEN ALTER TABLE … RENAME COLUMN … ; END IF; END $$;` (see 012).
+> | Command | Does |
+> |---|---|
+> | `npm run migrate` | applies every pending file, in order |
+> | `npm run migrate:status` | reports applied/pending/edited/orphaned, changes nothing |
+> | `npm run migrate:baseline` | records all files as applied **without executing them** — dry run unless given `-- --yes` |
 >
-> **Verify a new migration by running the whole suite twice** against the `_test` database — `DB_NAME=leave_management_system_test node src/scripts/runMigrations.js`, twice, both clean. Never point that at the dev DB just to test replay behaviour. A ledger table would make all of this unnecessary and is the better long-term fix; it isn't built yet.
+> - **Each file runs in its own transaction, with its ledger row inserted inside it** — so a file either fully applies and is recorded, or neither. A failure stops the run rather than skipping ahead, because migration 040 almost certainly assumes 039 landed. A file needing statements Postgres won't run in a transaction (`CREATE INDEX CONCURRENTLY`) opts out with a `-- migrate:no-transaction` marker.
+> - **An edited already-applied file aborts the run before anything is applied.** Fatal on purpose: it means this database and every other one are now running different schemas, and continuing would paper over the divergence.
+> - **Checksums hash LF-normalized content, never raw bytes, and that line is load-bearing.** `core.autocrlf=true` is set here, so every `.sql` file is LF in git and CRLF in a Windows working tree — hashing raw bytes would make the identical file hash differently on a laptop than on Render, and *every* run would fail with a meaningless mismatch. There's a test pinning this (`migrations.test.js`).
+> - **A session-scoped advisory lock wraps the whole run**, taken on the same client that does the work — `pool.query` could hand each statement a different connection and the lock would then guard nothing. Two concurrent deploys serialize instead of both applying the same pending list.
+> - **`baseline` is a one-time step for a database that predates the ledger**, and refuses when the ledger already has rows. That refusal matters: baselining a database that genuinely has migrations outstanding is the single way this system could lose a schema change, and it would do it silently. It is a **dry run by default** — which beats a confirmation prompt because it behaves identically over SSH, in CI, and in a non-interactive shell.
+> - **`schema_migrations` must never enter `setup.js`'s `TRUNCATE` list.** Truncating the ledger between tests would make every run believe the database was unmigrated.
+>
+> **Replay-safety is now a convention, not a requirement.** The ledger means a file runs once, so `IF NOT EXISTS` and friends are no longer what stands between you and a broken run — but keep writing them anyway: they make baselining forgiving and manual recovery possible when a ledger row and reality disagree. What's gone is the *ritual* — you no longer need to run the whole suite twice against `_test` to prove a new file is idempotent. The rules, for reference:
+> - `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP ... IF EXISTS`.
+> - Seed `INSERT`s carry `ON CONFLICT ... DO NOTHING`.
+> - A constraint change is always `DROP CONSTRAINT IF EXISTS` **then** `ADD CONSTRAINT` — `ADD` alone fails on a duplicate name.
+> - A `RENAME` can't be made idempotent with a clause, so guard it with a `DO ... information_schema ...` block (see 012).
+>
+> Historical note, because it explains why all 37 existing files are already idempotent: before the ledger the runner replayed everything on every run, and `002_create_roles.sql`'s bare `CREATE TABLE roles` aborted the whole run with `relation "roles" already exists` — leaving migration 037 unapplied and looking like a problem with 037.
 
-> ⚠️ **Migrations must be applied manually to every environment.** The runner has no tracking table (see the known-limitation note in `server/README.md`), so adding a migration file does **not** update any database on its own. After writing one, apply it to the dev DB, the `_test` DB (or backend tests fail on the old schema), **and** the Render production DB — a deployed frontend hitting an unmigrated production DB shows up as a generic load failure like "Unable to load holidays", which is easy to misdiagnose as an API/CORS bug.
+> ⚠️ **Migrations are applied manually to every environment, deliberately — the ledger tells you what's pending, it does not run anything for you.** Adding a migration file still updates no database on its own. After writing one, run `npm run migrate` against the dev DB, the `_test` DB (or backend tests fail on the old schema), **and** the Render production DB. Auto-running on deploy was considered and rejected: a bad migration would then take down production unattended, and Render's free tier gives you no shell to recover from. A deployed frontend hitting an unmigrated production DB shows up as a generic load failure like "Unable to load holidays", easy to misdiagnose as an API/CORS bug — `npm run migrate:status` answers it in one line.
 
 > ⚠️ **FullCalendar `display: "list-item"` does not put a dot on every day of a multi-day event.** A single event with `start`/`end` spanning several days renders as just **one** dot on the start day, so the remaining days look empty. `HolidayCalendar.jsx` therefore expands each holiday range into one single-day event per date (`eachDateKeyInRange` in `client/src/utils/dates.js`) — don't "simplify" it back to one event with an `end`.
 

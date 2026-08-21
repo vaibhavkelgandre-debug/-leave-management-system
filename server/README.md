@@ -58,9 +58,25 @@ DB_NAME=leave_management_system_test npm run migrate
 $env:DB_NAME = "leave_management_system_test"; npm run migrate; Remove-Item Env:DB_NAME
 ```
 
-> ℹ️ **The runner has no tracking table — it re-executes *every* migration file, every time.** That's safe: every file in `src/sql/` is written to be replay-safe (`IF NOT EXISTS`, `DROP … IF EXISTS` before an `ADD CONSTRAINT`, `ON CONFLICT DO NOTHING` on seeds, and an `information_schema` guard around the one `RENAME`), so running `npm run migrate` against an already-migrated database applies the new files and no-ops the rest.
+> ℹ️ **The runner keeps a ledger, so it applies only what's new.** A `schema_migrations` table records every applied file with a checksum, so `npm run migrate` against an already-migrated database applies the pending files and skips the rest — you never have to work out which ones are new.
 >
-> This used to fail with `relation "roles" already exists` at `002_create_roles.sql`, which aborted the whole run and left any *new* migration unapplied — the old advice was to apply new files by hand with `psql -f`. That's no longer necessary. **When you add a migration, keep it replay-safe** (see the rules in `.claude/rules.md`) and verify by running the suite twice against the `_test` database.
+> ```bash
+> npm run migrate            # apply everything pending
+> npm run migrate:status     # what is applied, pending, edited or missing
+> ```
+>
+> Each file runs in its own transaction together with its ledger row, so a failure leaves nothing half-applied. Editing a file that already ran aborts the next run, since that would mean two environments running different schemas.
+
+### Baselining a database that predates the ledger
+
+A database holding the full schema but no `schema_migrations` table would otherwise look completely unmigrated. Record its history once, without executing anything:
+
+```bash
+npm run migrate:baseline              # dry run - lists what it would record
+npm run migrate:baseline -- --yes     # writes the rows
+```
+
+Only do this on a database you know is already up to date; it refuses if the ledger has rows. If the database is genuinely behind, run `npm run migrate` instead.
 
 ## 5. Run the server
 
