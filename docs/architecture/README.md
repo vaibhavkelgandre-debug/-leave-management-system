@@ -26,11 +26,11 @@
 | 05 | [05-auth-and-authorization.md](05-auth-and-authorization.md) | Authentication & authorization flow |
 | 06 | [06-workflow-index.md](06-workflow-index.md) | Module workflows — index, and HR reporting/CSV |
 | 07 | [07-workflow-employee-onboarding.md](07-workflow-employee-onboarding.md) | Workflow — adding a new employee |
-| 08 | [08-workflow-documents-and-verification.md](08-workflow-documents-and-verification.md) | Workflow — document upload & profile verification *(not written yet)* |
+| 08 | [08-workflow-documents-and-verification.md](08-workflow-documents-and-verification.md) | Workflow — document upload & profile verification |
 | 09 | [09-workflow-leave-application.md](09-workflow-leave-application.md) | Workflow — applying for leave |
 | 10 | [10-workflow-leave-decisions.md](10-workflow-leave-decisions.md) | Workflow — approve / reject / override / withdraw / cancel |
-| 11 | [11-workflow-payroll-and-payslips.md](11-workflow-payroll-and-payslips.md) | Workflow — payroll run & payslips *(not written yet)* |
-| 12 | [12-workflow-notifications-and-email.md](12-workflow-notifications-and-email.md) | Workflow — notifications & outbound email *(not written yet)* |
+| 11 | [11-workflow-payroll-and-payslips.md](11-workflow-payroll-and-payslips.md) | Workflow — payroll run & payslips |
+| 12 | [12-workflow-notifications-and-email.md](12-workflow-notifications-and-email.md) | Workflow — notifications & outbound email |
 | 13 | [13-errors-and-api-map.md](13-errors-and-api-map.md) | Error handling & API documentation map |
 | 14 | [14-function-map.md](14-function-map.md) | Function map, by module |
 | 15 | [15-testing.md](15-testing.md) | Testing — covered, missing, and traced to code |

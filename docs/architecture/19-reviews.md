@@ -55,7 +55,11 @@ None of these are correctness bugs — they're all one extra round-trip per hand
 
 ### Pagination
 
-**Confirmed unpaginated, at every layer (validator, controller, service, repository SQL)** for: `GET /leave-requests/team`, `/mine`, `/all`, `/leave-requests` (HR filtered browse), `/leave-requests/report`, and — **not currently named in `docs/4.non_functional_requirements.md`'s own list, a gap in that doc worth fixing** — `GET /api/users` as well. All return every matching row unconditionally. Acceptable at the brief's stated scale (200 employees, 3 years of history) but a real constraint if this system ever grows past that.
+**Since resolved.** The endpoints that grow with time are now paginated on the `limit`/`offset` + `{ rows, total }` contract: `GET /leave-requests/team`, `/all`, `/leave-requests` (HR's filtered browse) and `GET /salary-slips`. Counts that used to be derived by fetching a list are their own endpoints (`/leave-requests/pending-count`, `/users/me/team/count`, `/notifications/unread-count`), and `GET /users/options` is a five-column projection for dropdowns that were pulling ~40 columns per user to render a name.
+
+The team/approvals endpoints take **either** a page **or** a `startDate`+`endDate` window capped at 62 days — the calendar needs a whole month at once, and page 1 of a busy team is not "this month". The window needs no `limit` because its span bounds it, which is why both dates are required together and the cap exists.
+
+What remains unpaginated is bounded by headcount or by leave-type count rather than by time: `/leave-types`, `/holidays` (year-scoped), `/leave-balances/me`, `/employees/:id/documents`, `/delegations/*`, `/leave-requests/:id/audit`, every `/mine` endpoint, and `/report` + `/report/csv` (aggregated to one row per employee — and a CSV export *should* cover everything). Still unmeasured: no load testing has been done either way.
 
 ### Balance calculation — explicitly checked, not an N+1
 
@@ -82,7 +86,7 @@ The self-healing balance-seeding path (`listBalancesForUser`) is two queries tot
 
 **MEDIUM**
 - No database transactions around multi-statement writes (Part 26/27) — a real, if narrow, data-consistency risk.
-- Several unpaginated list endpoints, including one (`GET /api/users`) not yet tracked in the NFR doc alongside its siblings.
+- No load testing. The time-growing endpoints are paginated and indexed for it (including `idx_leave_requests_employee_start_date`, which lets a page be walked in order rather than sorted whole), but the NFR-7 target of 200 employees × 3 years has never been measured.
 
 **LOW**
 - Minor duplicate-query patterns in `decideLeaveRequest`/`changeManager`/`changeStatus` (Part 27).

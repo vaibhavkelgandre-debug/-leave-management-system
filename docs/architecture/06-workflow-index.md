@@ -8,13 +8,15 @@
 
 Every module actually present in the codebase, cross-referenced to its full trace below:
 
-- **Accounts, roles, reporting** → Part 11 (employee invite) below.
-- **Leave request submission** → Part 12.
-- **Leave approval / rejection / HR override / withdraw / cancel** → Part 13.
-- **Leave balance** → embedded in Parts 12/13 (it's not a standalone workflow — every balance change is a side effect of a decision action, computed live from the ledger, never a separate "update balance" call).
-- **Delegation** → Part 13's delegate sub-trace.
-- **Authentication** → Part 8.
-- **HR dashboard / reporting (CSV)** → traced below (Part 10a).
+- **Accounts, roles, reporting** → [07-workflow-employee-onboarding.md](07-workflow-employee-onboarding.md).
+- **Document upload & profile verification** → [08-workflow-documents-and-verification.md](08-workflow-documents-and-verification.md).
+- **Payroll run & payslips** → [11-workflow-payroll-and-payslips.md](11-workflow-payroll-and-payslips.md).
+- **Leave request submission** → [09-workflow-leave-application.md](09-workflow-leave-application.md).
+- **Leave approval / rejection / HR override / withdraw / cancel** → [10-workflow-leave-decisions.md](10-workflow-leave-decisions.md).
+- **Leave balance** → embedded in the two leave workflows (it's not a standalone workflow — every balance change is a side effect of a decision action, computed live from the ledger, never a separate "update balance" call).
+- **Delegation** → [10-workflow-leave-decisions.md](10-workflow-leave-decisions.md)'s delegate sub-trace, plus the timer-driven start/end notifications in [12-workflow-notifications-and-email.md](12-workflow-notifications-and-email.md).
+- **Authentication & authorization** → [05-auth-and-authorization.md](05-auth-and-authorization.md).
+- **HR dashboard / reporting (CSV)** → traced below.
 - **Notifications** → in-app (`notifications` table + bell) for everything, plus **three** outbound email paths, all going through `config/mailer.js` (SendGrid's HTTP API — SMTP is unusable from Render, which blocks 587 and 465) and each individually switchable via `config/mailFeatures.js`: the **password-reset link** (the only flow with no alternative delivery — returning the link in an API response would let anyone reset anyone's password), the **invite link** (also still returned to HR as a fallback, so this one degrades rather than breaks when mail is off), and the **payslip PDF** after a confirmed payroll run (attached, so it previews and downloads inside the mail client; the in-app notification and the download endpoint remain the non-email path). No SMS or push anywhere.
 - **Calendar** → `MyLeaveCalendar`/`TeamLeaveCalendar`/`HolidayCalendar`, all FullCalendar-backed, fed by whichever list the host page already fetched — no separate calendar API exists.
 

@@ -67,7 +67,14 @@ sequenceDiagram
 
 **Why authorization must be enforced on the backend, not just the UI**: the brief's own framing, echoed throughout `.claude/rules.md` — a reviewer is expected to open the network tab, change an id in a request, and try to act on somebody else's record. Every "hide this button for this role" decision in the frontend (`canOverride`, `RoleGate`, `RequireRole`) is a UX nicety only; the actual gate is server-side and produces the exact same 403/404 whether or not the UI would have shown the control.
 
-**Three roles**, additive, not mutually exclusive privilege tiers: `EMPLOYEE` (base), `MANAGER` (adds team visibility/approval), `HR_ADMIN` (adds company-subtree visibility + admin actions).
+**Four roles**, additive rather than mutually exclusive privilege tiers: `EMPLOYEE` (base), `MANAGER` (adds team visibility/approval), `HR_ADMIN` (adds subtree visibility + admin actions), and `SUPER_ADMIN`.
+
+`SUPER_ADMIN` is a **singleton** and differs from `HR_ADMIN` in scope rather than in kind. Two properties matter:
+
+- **Company-wide views belong to it, not to HR.** The All Employees roster and cross-company leave reporting are `SUPER_ADMIN`-only; an `HR_ADMIN` sees their own subtree. Anything a role can't see returns **404, not 403** — existence isn't disclosed.
+- **Its HR scope is its direct-report `HR_ADMIN`s**, not everyone. `hrScopeService.isInActorsHrScope` resolves "in my scope" differently per role, which is why services call it rather than comparing roles inline.
+
+Almost every HR-tier gate is therefore written `requireRole("HR_ADMIN", "SUPER_ADMIN")`. [`docs/7.role_permissions_matrix.md`](../7.role_permissions_matrix.md) is the authoritative capability table and is updated whenever a role's access changes.
 
 ### `resolveActingCapacity(actor, request, action)` — the full decision tree
 
@@ -103,7 +110,7 @@ flowchart TD
 
 ### Reporting-tree scoping — the second authorization mechanism
 
-`requireUserScope(paramName)` (middleware) gates `GET /users/:id` and `GET /leave-balances/user/:id`: self, or `HR_ADMIN`, or a `MANAGER` whose subtree includes the target (`isUserInSubtree`).
+`requireUserScope(paramName)` (middleware) gates `GET /users/:id` and `GET /leave-balances/user/:id`: self, or HR-tier (`HR_ADMIN`/`SUPER_ADMIN`), or a `MANAGER` whose subtree includes the target (`isUserInSubtree`).
 
 `changeManager`/`changeStatus` (`userService.js`) add a *third*, narrower rule on top: even an `HR_ADMIN` who can *see* every user can only *edit* the manager/status of a user they themselves created (`actor.id === target.invited_by`) — a real bug found and fixed mid-project (see `.claude/rules.md`'s bullet on this), generalized from "HR_ADMIN targets only" to every role.
 
