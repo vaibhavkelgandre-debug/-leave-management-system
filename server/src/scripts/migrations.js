@@ -188,7 +188,14 @@ export async function applyPending({ pool, dir, table = DEFAULT_TABLE, log = con
 // `apply` defaults to false so the CLI can show exactly what it would record
 // and change nothing. A dry run by default beats a confirmation prompt: it
 // works identically over SSH, in CI, and in a non-interactive shell.
-export async function baseline({ pool, dir, table = DEFAULT_TABLE, apply = false, log = console.log }) {
+export async function baseline({
+    pool,
+    dir,
+    table = DEFAULT_TABLE,
+    apply = false,
+    pendingOnly = false,
+    log = console.log,
+}) {
     const client = await pool.connect();
 
     try {
@@ -196,6 +203,49 @@ export async function baseline({ pool, dir, table = DEFAULT_TABLE, apply = false
         await ensureLedger(client, table);
 
         const existing = await appliedChecksums(client, table);
+
+        // `pendingOnly` exists for one specific, real situation: a run against
+        // a database with data but no ledger died partway, so the ledger holds
+        // the files that did execute and the rest are unrecorded even though
+        // the schema already contains them.
+        //
+        // That happened the first time this shipped. Replaying migration 033
+        // against production failed with "check constraint
+        // notifications_type_check is violated by some row" — 033 narrows that
+        // constraint to 16 values and 036 widens it to 17, so re-imposing
+        // 033's version against rows created under 036's is a violation. The
+        // files are idempotent DDL, which is *not* the same as safe to replay
+        // against newer data.
+        //
+        // Recording the remainder is then the correct completion, but it is
+        // also exactly the operation the refusal below exists to prevent, so
+        // it needs both flags and the same caveat: only when you know the
+        // schema is already current.
+        if (existing.size && pendingOnly) {
+            const files = readMigrationFiles(dir);
+            const pending = files.filter((file) => !existing.has(file.filename));
+
+            if (!pending.length) {
+                log(`Nothing to record — all ${files.length} migration(s) are already in ${table}.`);
+                return [];
+            }
+            if (!apply) {
+                log(`Dry run — would record ${pending.length} unrecorded migration(s) without executing them:`);
+                for (const file of pending) log(`  · ${file.filename}`);
+                log("Re-run with --yes to write these rows.");
+                return [];
+            }
+
+            for (const file of pending) {
+                await client.query(
+                    `INSERT INTO ${table} (filename, checksum, duration_ms) VALUES ($1, $2, 0)`,
+                    [file.filename, file.checksum]
+                );
+            }
+            log(`Recorded ${pending.length} migration(s) as applied. Nothing was executed.`);
+            return pending.map((file) => file.filename);
+        }
+
         if (existing.size) {
             // Only the writing form is an error. A dry run changes nothing, so
             // "you already did this" is information, not a failure — reporting

@@ -166,6 +166,7 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 > | `npm run migrate` | applies every pending file, in order |
 > | `npm run migrate:status` | reports applied/pending/edited/orphaned, changes nothing |
 > | `npm run migrate:baseline` | records all files as applied **without executing them** — dry run unless given `-- --yes` |
+> | `npm run migrate:baseline -- --yes --pending-only` | records only the *unrecorded* files — recovery for a ledger left partial by a failed run |
 >
 > - **Each file runs in its own transaction, with its ledger row inserted inside it** — so a file either fully applies and is recorded, or neither. A failure stops the run rather than skipping ahead, because migration 040 almost certainly assumes 039 landed. A file needing statements Postgres won't run in a transaction (`CREATE INDEX CONCURRENTLY`) opts out with a `-- migrate:no-transaction` marker.
 > - **An edited already-applied file aborts the run before anything is applied.** Fatal on purpose: it means this database and every other one are now running different schemas, and continuing would paper over the divergence.
@@ -174,6 +175,14 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 > - **`baseline` is a one-time step for a database that predates the ledger**, and refuses when the ledger already has rows. That refusal matters: baselining a database that genuinely has migrations outstanding is the single way this system could lose a schema change, and it would do it silently. It is a **dry run by default** — which beats a confirmation prompt because it behaves identically over SSH, in CI, and in a non-interactive shell.
 > - **`schema_migrations` must never enter `setup.js`'s `TRUNCATE` list.** Truncating the ledger between tests would make every run believe the database was unmigrated.
 >
+> 🚨 **Idempotent DDL is not the same as safe to replay against newer data — and this was learned the hard way, in production.** Running `migrate` against the Render database (full schema, no ledger yet) died at `033_alter_notifications_add_types.sql` with `check constraint "notifications_type_check" of relation "notifications" is violated by some row`. 033 narrows that constraint to 16 values; 036 widens it to 17 by adding `PROFILE_CREATED`; the live app had already written rows with that type. Re-imposing 033's narrower version against 036-era rows is a violation, and no amount of `IF EXISTS` guarding prevents it — the file *is* idempotent, and it still can't be replayed.
+>
+> Two consequences:
+> - **For a database that has data but no ledger, `baseline` — not `migrate`.** The earlier advice here (run `migrate`, it "can't lose anything") was wrong: it can't lose data, but it can fail outright, and on a constraint-narrowing file it will. The three-clean-runs verification that produced that advice ran against `_test`, which had no `PROFILE_CREATED` rows, so it proved less than it appeared to.
+> - **Nothing broke, because of the per-file transaction.** 033's `DROP CONSTRAINT` rolled back with its failed `ADD`, so the table kept the 036-era constraint. Without the transaction, that table would have been left with no type constraint at all.
+>
+> Recovery from a half-populated ledger is `migrate:baseline -- --yes --pending-only`, which records the unrecorded files without executing them. It needs both flags on purpose: it is precisely the operation the plain refusal exists to prevent, so it's only ever right when you know the schema is already current — which, in that production case, the failure itself proved (rows of a type only 036 allows).
+
 > **Replay-safety is now a convention, not a requirement.** The ledger means a file runs once, so `IF NOT EXISTS` and friends are no longer what stands between you and a broken run — but keep writing them anyway: they make baselining forgiving and manual recovery possible when a ledger row and reality disagree. What's gone is the *ritual* — you no longer need to run the whole suite twice against `_test` to prove a new file is idempotent. The rules, for reference:
 > - `CREATE TABLE IF NOT EXISTS`, `CREATE INDEX IF NOT EXISTS`, `ADD COLUMN IF NOT EXISTS`, `DROP ... IF EXISTS`.
 > - Seed `INSERT`s carry `ON CONFLICT ... DO NOTHING`.

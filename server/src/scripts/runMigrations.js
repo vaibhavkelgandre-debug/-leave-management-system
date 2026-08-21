@@ -77,7 +77,15 @@ async function main() {
         return;
     }
     if (command === "baseline") {
-        await baseline({ pool, dir: sqlDir, apply: flags.includes("--yes") });
+        await baseline({
+            pool,
+            dir: sqlDir,
+            apply: flags.includes("--yes"),
+            // Both flags required together on purpose — see the note in
+            // migrations.js. This records unexecuted files as applied, which
+            // is only ever right when the schema is known to be current.
+            pendingOnly: flags.includes("--pending-only"),
+        });
         return;
     }
 

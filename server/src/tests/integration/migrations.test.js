@@ -227,6 +227,63 @@ describe("baseline", () => {
     });
 });
 
+describe("baseline --pending-only", () => {
+    it("records just the unrecorded files, without executing them", async () => {
+        const ran = `zz_mig_ran_${uniqueSuffix()}`;
+        writeMigration("001_a.sql", migrationCreating(ran));
+        await applyPending({ pool, dir, table, log: silent });
+
+        // Simulates the production case: a replay died partway, so later files
+        // are unrecorded even though the schema already contains them.
+        const notRun = `zz_mig_assumed_${uniqueSuffix()}`;
+        writeMigration("002_b.sql", migrationCreating(notRun));
+        writeMigration("003_c.sql", migrationCreating(`zz_mig_assumed2_${uniqueSuffix()}`));
+
+        const recorded = await baseline({ pool, dir, table, apply: true, pendingOnly: true, log: silent });
+
+        expect(recorded).toEqual(["002_b.sql", "003_c.sql"]);
+        expect((await ledgerRows()).map((row) => row.filename)).toEqual(["001_a.sql", "002_b.sql", "003_c.sql"]);
+        expect(await tableExists(notRun)).toBe(false);
+        expect(await tableExists(ran)).toBe(true);
+    });
+
+    it("is a dry run without apply, even with pendingOnly", async () => {
+        writeMigration("001_a.sql", migrationCreating(`zz_mig_po_dry_${uniqueSuffix()}`));
+        await applyPending({ pool, dir, table, log: silent });
+        writeMigration("002_b.sql", "SELECT 1;");
+
+        expect(await baseline({ pool, dir, table, pendingOnly: true, log: silent })).toEqual([]);
+        expect((await ledgerRows()).map((row) => row.filename)).toEqual(["001_a.sql"]);
+    });
+
+    it("reports nothing to do when every file is already recorded", async () => {
+        writeMigration("001_a.sql", migrationCreating(`zz_mig_po_none_${uniqueSuffix()}`));
+        await applyPending({ pool, dir, table, log: silent });
+
+        const lines = [];
+        const recorded = await baseline({
+            pool,
+            dir,
+            table,
+            apply: true,
+            pendingOnly: true,
+            log: (line) => lines.push(line),
+        });
+
+        expect(recorded).toEqual([]);
+        expect(lines.join(" ")).toMatch(/nothing to record/i);
+    });
+
+    it("leaves migrate with nothing to do afterwards", async () => {
+        writeMigration("001_a.sql", migrationCreating(`zz_mig_po_then_${uniqueSuffix()}`));
+        await applyPending({ pool, dir, table, log: silent });
+        writeMigration("002_b.sql", migrationCreating(`zz_mig_po_then2_${uniqueSuffix()}`));
+        await baseline({ pool, dir, table, apply: true, pendingOnly: true, log: silent });
+
+        expect(await applyPending({ pool, dir, table, log: silent })).toEqual([]);
+    });
+});
+
 describe("inspect", () => {
     it("separates pending, changed and orphaned without applying anything", async () => {
         writeMigration("001_a.sql", migrationCreating(`zz_mig_inspect_${uniqueSuffix()}`));

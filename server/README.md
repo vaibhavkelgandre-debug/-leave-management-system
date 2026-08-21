@@ -78,6 +78,17 @@ npm run migrate:baseline -- --yes     # writes the rows
 
 Only do this on a database you know is already up to date; it refuses if the ledger has rows. If the database is genuinely behind, run `npm run migrate` instead.
 
+> ⚠️ **On a database that already holds data, prefer `baseline` over `migrate`.** The files are idempotent, but idempotent is not the same as replayable: `033_alter_notifications_add_types.sql` narrows a check constraint that `036` later widens, so replaying 033 against rows created under 036's constraint fails with `is violated by some row`. It fails safely — each file is transactional, so the constraint is left as it was — but the run stops.
+>
+> If a run died partway like that, the ledger holds the files that did execute and the rest are unrecorded even though the schema has them. Record the remainder without executing it:
+>
+> ```bash
+> npm run migrate:baseline -- --pending-only              # dry run
+> npm run migrate:baseline -- --yes --pending-only        # writes the rows
+> ```
+>
+> Both flags are required together because this marks files applied that never ran — correct only when the schema is genuinely current.
+
 ## 5. Run the server
 
 ```bash
