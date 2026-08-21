@@ -109,14 +109,33 @@ const HOST_CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedTransporter = null;
 let cachedUntil = 0;
 
+// Random rather than [0], for the reason nodemailer itself randomizes —
+// spread across Google's pool — and so the retry after an invalidated cache
+// can land on a different address.
+function pick(addresses) {
+    return addresses.length ? addresses[Math.floor(Math.random() * addresses.length)] : null;
+}
+
+// `dns.lookup` first, `dns.resolve4` only as a backstop, and the order is the
+// whole point: resolve4 is c-ares, which talks to the nameservers in
+// /etc/resolv.conf itself — the exact path nodemailer uses, and the one that
+// came back with no A record at all on Render. dns.lookup instead calls the
+// platform's getaddrinfo, so it honours the container's full resolution stack
+// (nsswitch, /etc/hosts, any DNS64 synthesis) and returns what the host
+// itself would connect to. Pinning via the mechanism that already failed
+// would have reproduced the bug it was written to fix.
 async function ipv4For(host) {
     if (!host || net.isIP(host)) return null;
-    const addresses = await dns.resolve4(host);
-    if (!addresses.length) return null;
-    // Random rather than [0], for the reason nodemailer itself randomizes —
-    // spread across Google's pool — and so the retry after an invalidated
-    // cache can land on a different address.
-    return addresses[Math.floor(Math.random() * addresses.length)];
+
+    try {
+        const results = await dns.lookup(host, { family: 4, all: true });
+        const address = pick(results.map((entry) => entry.address));
+        if (address) return address;
+    } catch {
+        // Fall through — resolve4 may still answer.
+    }
+
+    return pick(await dns.resolve4(host));
 }
 
 // Built lazily and cached rather than at module load, because resolution is
