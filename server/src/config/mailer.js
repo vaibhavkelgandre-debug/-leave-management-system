@@ -27,6 +27,8 @@
 // `{ filename, content: Buffer, contentType }` and this function maps it to
 // whatever the current provider wants — keeping the swap a one-file change,
 // which is the whole point of this module.
+import dns from "node:dns/promises";
+import net from "node:net";
 import nodemailer from "nodemailer";
 import dotenv from "dotenv";
 
@@ -68,17 +70,78 @@ function fromAddress() {
 // No connection pooling: pooling is for bulk sends, and a pooled connection
 // idle between password resets gets closed server-side, producing a
 // stale-socket failure on the next send.
-const transporter = isMailConfigured()
-    ? nodemailer.createTransport({
-          host: process.env.SMTP_HOST,
-          port: Number(process.env.SMTP_PORT) || 587,
-          secure: process.env.SMTP_SECURE === "true",
-          auth: { user: process.env.SMTP_USER, pass: smtpPassword() },
-          connectionTimeout: CONNECTION_TIMEOUT_MS,
-          greetingTimeout: GREETING_TIMEOUT_MS,
-          socketTimeout: SOCKET_TIMEOUT_MS,
-      })
-    : null;
+function transportOptions({ host, servername }) {
+    return {
+        host,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: process.env.SMTP_SECURE === "true",
+        auth: { user: process.env.SMTP_USER, pass: smtpPassword() },
+        connectionTimeout: CONNECTION_TIMEOUT_MS,
+        greetingTimeout: GREETING_TIMEOUT_MS,
+        socketTimeout: SOCKET_TIMEOUT_MS,
+        // Set only when `host` is an IP literal (see getTransporter below):
+        // without it TLS validates the certificate against the address rather
+        // than smtp.gmail.com and every send fails on a hostname mismatch.
+        ...(servername ? { tls: { servername } } : {}),
+    };
+}
+
+// Why this resolves DNS itself instead of handing nodemailer the hostname.
+//
+// Nodemailer does not use dns.lookup. lib/shared/index.js calls resolve4 and
+// resolve6 separately, concatenates the results IPv4-first, then picks one at
+// *random*, keeping the others as connect-failure fallbacks. Render has no
+// IPv6 route, so any pick landing on an AAAA record fails with ENETUNREACH —
+// and when the platform resolver returns no A record at all there is no
+// fallback left to try. That is exactly how
+// "connect ENETUNREACH 2404:6800:4003:c05::6d:587" reached production with
+// every invite and password reset silently undelivered, while the identical
+// config worked locally.
+//
+// Handing nodemailer an IPv4 literal makes its own resolution a no-op (it
+// short-circuits on an IP), so the address family cannot be chosen wrongly.
+//
+// Deliberately falls back to the hostname if the A lookup fails: that is the
+// pre-existing behaviour, so a resolver hiccup can never leave us worse off
+// than not pinning at all.
+const HOST_CACHE_TTL_MS = 5 * 60 * 1000;
+
+let cachedTransporter = null;
+let cachedUntil = 0;
+
+async function ipv4For(host) {
+    if (!host || net.isIP(host)) return null;
+    const addresses = await dns.resolve4(host);
+    if (!addresses.length) return null;
+    // Random rather than [0], for the reason nodemailer itself randomizes —
+    // spread across Google's pool — and so the retry after an invalidated
+    // cache can land on a different address.
+    return addresses[Math.floor(Math.random() * addresses.length)];
+}
+
+// Built lazily and cached rather than at module load, because resolution is
+// async. The TTL means a rotated Google IP is picked up without a restart,
+// and rebuilding is cheap precisely because there is no pool to warm.
+async function getTransporter() {
+    if (!isMailConfigured()) return null;
+    if (cachedTransporter && Date.now() < cachedUntil) return cachedTransporter;
+
+    const host = process.env.SMTP_HOST;
+    let options = transportOptions({ host });
+
+    try {
+        const address = await ipv4For(host);
+        if (address) options = transportOptions({ host: address, servername: host });
+    } catch (error) {
+        console.warn(
+            `Could not resolve an IPv4 address for ${host} (${error.code || error.message}) — using the hostname`
+        );
+    }
+
+    cachedTransporter = nodemailer.createTransport(options);
+    cachedUntil = Date.now() + HOST_CACHE_TTL_MS;
+    return cachedTransporter;
+}
 
 // Input: one message, described in provider-neutral terms, where
 // `attachments` (optional) is a list of `{ filename, content: Buffer,
@@ -104,6 +167,8 @@ const transporter = isMailConfigured()
 export async function sendMail({ to, subject, text, html, attachments }) {
     if (process.env.NODE_ENV === "test") return false;
 
+    const transporter = await getTransporter();
+
     if (!transporter) {
         // Attachment *contents* are never logged — a payslip PDF in the
         // dev console would be both useless and a data leak into log
@@ -115,7 +180,7 @@ export async function sendMail({ to, subject, text, html, attachments }) {
         return false;
     }
 
-    await transporter.sendMail({
+    const message = {
         from: fromAddress(),
         to,
         subject,
@@ -135,6 +200,16 @@ export async function sendMail({ to, subject, text, html, attachments }) {
                   })),
               }
             : {}),
-    });
+    };
+
+    try {
+        await transporter.sendMail(message);
+    } catch (error) {
+        // Drop the pinned address so the next send re-resolves: one dead IP in
+        // Google's pool would otherwise keep failing for the whole TTL.
+        cachedTransporter = null;
+        throw error;
+    }
+
     return true;
 }
