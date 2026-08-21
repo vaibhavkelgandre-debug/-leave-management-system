@@ -152,11 +152,38 @@ export async function sendMail({ to, subject, text, html, attachments }) {
     const content = [{ type: "text/plain", value: text }];
     if (html) content.push({ type: "text/html", value: html });
 
+    // Every tracking feature off, explicitly, because SendGrid enables click
+    // tracking by default and that default is actively wrong for this app.
+    //
+    // Click tracking rewrites every href into a `sendgrid.net` redirect. For
+    // these three emails that link is a single-use credential — an invite or
+    // password-reset token — so tracking would route a live secret through a
+    // third-party redirector, and it also destroys the one property that lets
+    // a recipient tell a real invite from a phishing attempt: a visible link
+    // to the domain the mail claims to come from. Mismatched link and sender
+    // domains are a spam signal in their own right.
+    //
+    // Open tracking embeds a remote 1x1 image, which contradicts
+    // mailLayout.js's no-remote-images rule (blocked images render as broken
+    // boxes) and buys nothing: nobody acts on an open rate for a password
+    // reset. Subscription tracking would append an unsubscribe footer to
+    // transactional mail nobody opted into, which is both nonsensical and a
+    // way to have someone "unsubscribe" from their own account emails.
+    //
+    // Set per-send rather than left to the dashboard so a console toggle
+    // can't silently reintroduce any of it.
+    const tracking_settings = {
+        click_tracking: { enable: false, enable_text: false },
+        open_tracking: { enable: false },
+        subscription_tracking: { enable: false },
+    };
+
     const payload = {
         personalizations: [{ to: [{ email: to }] }],
         from: fromAddress(),
         subject,
         content,
+        tracking_settings,
         ...(attachments?.length
             ? {
                   attachments: attachments.map((file) => ({
