@@ -1,0 +1,213 @@
+# Module 5, cross-cutting coverage & known gaps
+
+> Part of [Test Cases](README.md). If this disagrees with the code, the code wins.
+
+---
+
+## Module 5 — payroll & employee profile
+
+### Module 5: Payroll & Employee Profile
+
+#### ✅ Covered
+
+**Server — `profileVerification.test.js`**
+- Rejects submission with missing fields (400) or missing required documents (400)
+- Full state machine: `INCOMPLETE → SUBMITTED → VERIFIED`, visible in HR's pending queue only while `SUBMITTED`
+- Send-back to `INCOMPLETE` with a required reason (422 if missing), reason visible to the employee, cleared on resubmission
+- Rejects verify/send-back from non-HR (403) or an out-of-subtree HR admin (404)
+- Rejects verifying a still-`INCOMPLETE` profile (409)
+- Detail fetch scoped to the caller's subtree; verified-employee listing scoped the same way
+
+**Server — `profileVerification.test.js`** (document-gate cases)
+- Refuses to verify a profile while any required document is still `PENDING_REVIEW` (400, names the missed document, profile stays in the queue)
+- Refuses to verify a profile with a `REJECTED` document, and the message points HR at sending it back rather than retrying
+- Blocks resubmission until a rejected document is actually replaced, then accepts it and lets HR verify once the replacement is reviewed
+
+**Server — `employeeDocuments.test.js`**
+- 401 unauthenticated; rejects non-PDF/JPG/PNG content regardless of declared type (400)
+- Upload replaces a prior upload of the same required type; visibility scoped to uploader + in-subtree HR (404 otherwise)
+- HR review (verify/reject with comment), rejected from non-HR (403)
+- Custom documents: add any number, requires a name (422), fetch/delete own only (404 for someone else's)
+
+**Server — `employeeDocuments.test.js`** (document streaming)
+- Streams a document `inline` by default — correct `Content-Type`, `Content-Disposition: inline`, original filename, real bytes — which is what makes a PDF previewable at all (Cloudinary raw delivery forces a download)
+- `?disposition=attachment` still forces a save; the `/url` payload carries the `documentId` the viewer needs
+- 404 for a peer employee, 401 unauthenticated, 422 for a malformed id or a `disposition` outside the two allowed values
+
+**Server — `salaryStructures.test.js`**
+- 401 unauthenticated; rejects non-HR (403)
+- Assign within subtree, visible to employee + HR; update archives prior figures as a revision
+- Out-of-subtree employee unreachable (404)
+
+**Server — `salarySlips.test.js`**
+- 401 on every route; rejects calculate/confirm from non-HR (403)
+- Skips (without failing the run) unverified/no-structure employees, and one not yet joined for the period, with per-row reasons
+- Correct net-pay calculation with zero LOP; correct LOP deduction and per-day rate rounding for a `counts_as_lop` type
+- Pro-rates earnings for an employee who joined partway through the period (divisor stays the full month, payable days shrink), with a strictly lower net pay than the full-month figure
+- Reports `total_leave_days` as a superset of the LOP-only `lop_days` figure when both a LOP and a non-LOP leave type were taken in the same period
+- Rejects re-confirming an already-`ACTIVE` period (skip, figures untouched); allows confirming again after voiding, archiving pre-void figures
+- `calculate` still previews full figures even when `confirm` would be blocked
+- Rejects calculate/confirm for a not-yet-started period (400) **and** for the current, still-running month (400) — only a fully completed past month is runnable
+- Subtree-scoped visibility/generation throughout, including `/mine` vs. team list separation and role/profile-status filters
+- Void with reason; rejects double-void (409); rejects from non-HR (403) or out-of-subtree HR (404)
+- Re-confirm after void supersedes back to `ACTIVE`
+- Visible only to the employee and HR (404 for the manager); PDF disposition defaults to `attachment`, `inline` opt-in, any other value falls back safely (no header injection)
+
+**Server — `salarySlips.test.js`** (guard cases)
+- Skips an employee whose net pay works out to zero, keeping the figures visible, and commits nothing for them
+- Reports an employee who already holds an `ACTIVE` slip for the period as `already_generated` **in the preview** (not just at confirm), with `computed: null` and a matching `summary.alreadyGenerated`; a second approve commits nothing and leaves the original slip untouched
+- Returns that employee to `ok` once their slip is voided, reopening the period for a corrected run
+- *(Replaced the earlier "still previews full figures for a period that already has an ACTIVE slip" case, which asserted the pre-fix behaviour.)*
+
+**Server — `payslipEmail.test.js`** (`mailService` mocked; the PDF renderer deliberately is **not**, since the point is that a real attachment reaches the sender)
+- Emails each employee their own payslip after a confirmed run: right recipient, human-readable period label, `payslip-YYYY-MM.pdf` filename, and a real PDF buffer (asserted on the `%PDF-` signature)
+- One email per committed slip and none for a skipped employee
+- One employee's failed send doesn't stop the others, and never touches the committed slips
+- A run that commits nothing emails nothing
+
+**Server — `numberToWords.test.js`, `payslipPdfService.test.js` (unit)**
+- Correct Indian-numbering-system conversion across zero/tens/hundreds/thousands/lakhs/crores, paise rounding, numeric-string input
+- Produces a structurally valid, non-empty PDF for a complete slip, with missing optional fields, with an LOP deduction present, and for an employee who joined partway through the period (fewer payable days than the month)
+
+**Client — `ProfilePage.test.jsx`, `ProfileForm.test.jsx`, `ProfileDocumentUpload.test.jsx`, `ChangePasswordForm.test.jsx`, `ChangePasswordModal.test.jsx`, `EmployeeDetailsPage.test.jsx`, `EmployeeVerificationPage.test.jsx`, `EmployeeVerificationDetailPage.test.jsx`, `SalaryStructureForm.test.jsx`, `PayrollRunPage.test.jsx`, `PayrollRunForm.test.jsx`, `SalarySlipsPage.test.jsx`, `SalarySlipList.test.jsx`, `DocumentViewerPage.test.jsx`, `DocumentPreviewModal.test.jsx`**
+- Full profile page: identity display, manager/HR display, send-back banner (and its disappearance once verified), read-only↔edit toggle, submit-for-verification wiring
+- Profile form: collapsible sections, prefill, partial-save, conditional fields (no-passport / no-health-insurance clearing), server validation surfacing
+- Document upload widget: required-slot states, rejection-with-comment + replace flow, custom document add/remove
+- Password change form + modal wrapper
+- Employee details (post-verification, read-only) and verification queue/detail pages: full profile display, document view/verify/reject, whole-profile verify/send-back with required reason and cancel-out
+- Salary structure form: assign vs. update labeling, prefill, submit
+- Payroll run: calculate preview with role/status filters, approve with committed/skipped-with-reason summary, error surfacing
+- Salary slips page: employee-vs-HR views, tabs, void action, pay-period/role/employee filters
+- Document viewer/preview: own vs. others'-via-HR vs. custom vs. salary-slip URL resolution, unsupported-type fallback, error handling, "open in new tab"
+- Dashboard tile: never fetches a request list or the full team roster (regression test for the count endpoints), and titles itself for the organisation vs. the team by role
+- NavBar badge: renders the server's count, asks for no count at all for an employee with no delegation
+- Approvals: pages the list while the calendar keeps its whole month (the windowed call sends no `limit`), and hides the pager when everything fits on one page
+- Salary Slips: pages the team list, resets to page 1 when a filter changes, hides the pager on a single page
+- HR Reports browse: pages through results showing the server's total, hides the pager when everything fits on one page, and returns to page 1 when filters are applied or cleared
+- Dashboard "on leave today": renders as a table with Employee/Role/Leave type/Dates/Days columns, sorted by name, half-day noted; `SUPER_ADMIN` reads the company-wide list (and the tile is titled "Organisation overview") while every other role reads the team-scoped one
+- Dashboard "My leave": the leave-type picker filters the history to that type and shows its balance detail, a balance chip selects its own type, an untouched type says so, and each type keeps its own accent colour
+- My Team: HR can change a report's manager and deactivate them; a plain `MANAGER` is offered neither control on any row, including one attributed to them (the routes are HR-tier server-side); the manager-edit form opens in its own full-width `colSpan` row (not inside a column), the extended team is grouped under each manager with no Reports To column, and an unresolvable-manager report still shows (with that column back on)
+- `groupTeamByManager` (unit): groups reports under managers resolved from the directory, sorts managers and reports by first name, and collects anyone whose manager can't be resolved instead of dropping them
+- TopBar: the bar shows initials + role badge but not the user's name (which is the trigger's accessible name and appears in the open menu), carries no brand label, logs out only from inside the account menu, and the search box grows on focus / shrinks on blur while staying expanded whenever a query is present
+- Calendar events: hovering a holiday (HolidayCalendar) or a team leave bar (ApprovalsPage) shows the app's own `role="tooltip"` label with the date range and status, removes it on unhover, and carries no native `title` attribute
+- Document viewer renders every employee document through the app's own stream (`/employees/documents/:id/file`), never the Cloudinary URL — including the "open in new tab" link — with a fallback to the given URL when there's no document id (the salary-slip path)
+- Payroll run badges an already-paid employee as "Already received", distinctly from an amber "Skipped", and says how many in the summary line
+
+#### 🔴🟡 Gaps
+
+These first three are **already-documented, deliberate product gaps** from `.claude/rules.md`, not just missing tests — surfacing them here so they're visible in one place with everything else:
+
+- 🔴 **No re-sync of a salary slip's LOP when a leave request affecting that pay period is approved/cancelled *after* the slip was generated** — the slip silently drifts from the real leave record. Explicitly declined as out of scope so far.
+- 🔴 **No proration for an employee who *exits* mid-pay-period** — full-period figures are always calculated regardless of actual days employed. (Proration for an employee who *joins* mid-period was the other half of this gap — that half is now implemented, see `salarySlips.test.js` above and `.claude/rules.md`'s payroll section.)
+- 🟡 **Regenerating a slip after voiding always uses today's salary structure**, not the structure as of the original period.
+
+Genuinely untested (not just declined):
+
+- 🔴 **No test that the generated PDF's printed figures actually match the input data.** `payslipPdfService.test.js` only checks the byte stream is a structurally valid, non-empty PDF — never that the net-pay number rendered in it matches what was passed in. A positioning/formatting bug could silently print the wrong number while still "producing a valid PDF."
+- 🟡 No test at the file-size **limit boundary** for document/leave-request uploads (only wrong-content-type is tested, not exactly-at-the-limit vs. one-byte-over).
+- 🟡 No test simulating a Cloudinary upload failure — the documented guarantee ("a Cloudinary failure never leaves a half-created request behind") has no test exercising the failure path itself.
+- 🟡 No validation-edge-case tests for salary structure figures (negative pay, HRA exceeding basic, non-numeric input).
+- 🟡 No `SUPER_ADMIN`-specific test against salary structures/slips/documents directly — `superAdmin.test.js` proves the direct-report-only scoping principle via profile verification only; the same principle is applied to three other services per `.claude/rules.md` but isn't independently exercised there.
+
+---
+
+---
+
+## Cross-cutting — notifications, SUPER_ADMIN, shared UI
+
+### Cross-Cutting: Notifications
+
+#### ✅ Covered
+
+**Server — `notifications.test.js`**
+- 401 on every route; scoped strictly to the caller's own notifications (404 marking someone else's read)
+- Unread count tracking, `/read-all`, idempotent re-marking
+- Correct recipient + wording for: leave submission (manager, or HR when no manager), decision (including "(HR override)" suffix), withdraw/cancel, profile submit/verify/send-back round trip, salary slip confirmed/voided, manager reassignment (both parties, correct wording each, no-op suppressed), account activate/deactivate, salary structure update (**confirmed to never leak figures**), delegation nomination, team-member assignment + invite-accepted + the new employee's own profile-created prompt (all three from one invite/accept round trip), and the scheduled delegation start/end sweep (with dedup against repeat sweeps)
+
+**Client — `NotificationBell.test.jsx`, `NotificationsPage.test.jsx`, `notificationRouting.test.js`**
+- Badge count (including 9+ cap), empty state, click-to-navigate + mark-read, "mark all read" gating
+- Full notifications page pagination (20/page, Previous/Next boundary states)
+- Every notification type's deep-link destination mapped and tested, including the types with no dedicated page (fallback destinations)
+
+#### 🔴🟡 Gaps
+
+- 🟡 **No test that a failing `notify*` call doesn't break its parent action.** This is a stated architectural guarantee (try/catch, never rethrown) but nothing deliberately breaks a notify call and asserts the triggering action still succeeds — cheap to add, protects a real guarantee.
+- 🟡 No test of the bell's 30-second polling actually re-fetching over time (likely mocked around in existing tests).
+
+---
+
+### Cross-Cutting: SUPER_ADMIN
+
+#### ✅ Covered
+
+**Server — `superAdmin.test.js`**
+- Own leave request auto-approves (never `SUBMITTED`), correct ledger state (taken, not pending), single `AUTO_APPROVE` audit entry
+- A direct-report `HR_ADMIN`'s own request goes through normal `SUBMITTED`→approved-by-SUPER_ADMIN-as-manager
+- No override power under any circumstance (403)
+- Scoped to direct-report `HR_ADMIN`s only — can verify a direct report's profile, cannot reach two levels down (404)
+- Notified when a direct report submits their profile
+- `HR_ADMIN` reporting to `SUPER_ADMIN` shows correctly in the company-wide user list
+
+#### 🔴🟡 Gaps
+
+- 🟡 **The direct-report-only scoping principle is only independently tested via profile verification.** The same `isInActorsHrScope` helper is applied to salary structures, salary slips, and employee documents per `.claude/rules.md`, but none of those three has its own `SUPER_ADMIN`-scoped test proving the two-levels-down block holds there too.
+- 🟡 (Manual, not automatable) No documented manual test of promoting an **existing** `HR_ADMIN` to `SUPER_ADMIN` via the one-off `UPDATE` statement — worth a one-time manual pass confirming a promoted account behaves identically to a freshly-bootstrapped one.
+
+---
+
+### Cross-Cutting: Shared UI / Layout
+
+#### ✅ Covered
+
+**Client — `NavBar.test.jsx`, `Sidebar.test.jsx`, `TopBar.test.jsx`, `Tooltip.test.jsx`, `SearchSelect.test.jsx`, `Avatar.test.jsx`, `ProgressBar.test.jsx`**
+- Role-based link visibility, delegate-driven reveal of Approvals, pending-approvals badge accuracy
+- Collapsed-only hover tooltip behavior, portal-mode rendering/positioning/cleanup, `document.body` attachment
+- Sidebar collapse/mobile-close callbacks, logo centering
+- Top bar search filtering, identity dropdown, logout
+- Searchable select combobox: filtering, keyboard interaction (Enter/Escape), click-outside revert
+- Avatar initials, progress bar clamping
+
+#### 🔴🟡 Gaps
+
+- 🟡 No automated accessibility (a11y) audit anywhere (no `axe-core`/`jest-axe`) — manual a11y fixes exist (collapsed-nav `aria-label`, `sr-only` toggle labels) but nothing guards against future regressions.
+- 🟡 No test that the sidebar's collapsed/expanded preference actually **persists via `localStorage`** across a reload (only the toggle callback firing is tested).
+- 🟡 No automated responsive/viewport test for NFR-8 (phone-width usability) — verified manually per `4.non_functional_requirements.md`.
+
+---
+
+---
+
+## Non-functional gaps & suggested testing order
+
+### Non-Functional & Infrastructure Gaps
+
+These don't belong to a single module — they're about the *kind* of testing this app has zero coverage of, regardless of feature.
+
+- 🔴 **No end-to-end (E2E) browser test suite at all.** Every existing test is either a backend integration test (Supertest, no real browser) or a component test with mocked services (no real backend/DB). Nothing drives the actual full stack — real browser, real API, real database — through a complete journey (e.g., HR invites → employee accepts → submits leave with a document → manager approves → balance updates → HR runs payroll → employee views their payslip). This is the single biggest structural gap, and directly relevant to what "end-to-end module testing" means for this app today.
+- 🔴 **No load/performance testing** against the explicit NFR-7 target (200 employees, 3 years of history) — confirmed "not measured" in `4.non_functional_requirements.md` itself. Several list endpoints are also unpaginated.
+- 🔴 **No adversarial security test pass** — SQL injection attempts (architecturally prevented via parameterized queries, but never tested against), XSS payloads in free-text fields (reason, comments, custom document names) rendered back into the UI, and CSRF exposure given the cross-site `SameSite=None; Secure` cookie setup used for the Render deployment.
+- 🟡 No CI pipeline evidence (no GitHub Actions or similar) enforcing that the test suite actually runs on every push/PR — tests exist and pass locally, but nothing stops a broken build from being pushed.
+**Server — `migrations.test.js`** (the migration ledger)
+- Applies pending files in filename order, records each, and applies nothing on a second run
+- Applies only the new file when one is added after an earlier run
+- A failed migration rolls back, records nothing, and stops later files from running
+- An edited already-applied file aborts the run before anything is applied
+- Checksums ignore line endings, so the same file matches on Windows and Linux
+- `baseline` is a dry run by default, records without executing when applied, and refuses once the ledger has rows
+- `baseline --pending-only` records just the unrecorded files without executing them, is still a dry run without `--yes`, and reports when there's nothing left to record
+- `inspect` separates pending / edited / orphaned without changing anything
+- The real `src/sql` directory has unique, zero-padded, three-digit prefixes
+
+---
+
+### Suggested Testing Order
+
+Given the volume above, a practical module-by-module order — most reviewed/highest-risk first, matching what `.claude/rules.md` itself says reviewers will probe hardest:
+
+1. **Module 3 (Leave Requests & Approval)** — already the best-covered; close the two 🔴 gaps (long-sequence balance drift, concurrent overlap race) since this is explicitly the top review criterion.
+2. **Module 5 (Payroll)** — highest financial/data-integrity stakes; start with the PDF-content-matches-data gap and the SUPER_ADMIN-scoping gaps on the three untested services.
+3. **Module 1 (Accounts/Roles)** — close the SUPER_ADMIN concurrency and JWT-tampering gaps; build the seed script, since it unblocks manual testing of everything else.
+4. **Module 2 (Leave Types/Calendar)** — the year-boundary debit test and leave-type-deactivation behavior.
+5. **Module 4 (Dashboards)** — lower risk since it composes already-tested endpoints; mainly the SUPER_ADMIN-view gap.
+6. **Cross-cutting (Notifications, UI)** — lowest risk, mostly 🟡; the "failed notify doesn't break the action" test is cheap and worth doing early despite being cross-cutting.
+7. **Non-functional (E2E, load, security)** — biggest lift, do last as a dedicated effort rather than folding into feature work — an E2E suite in particular is a new tool/setup decision (e.g., Playwright), not just "more tests."

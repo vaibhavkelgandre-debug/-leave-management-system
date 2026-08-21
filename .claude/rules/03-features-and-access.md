@@ -1,0 +1,189 @@
+# Email, pagination, access control & the verification/payroll guards
+
+> Part of the [project rules](../rules.md). These are binding, not advisory.
+
+---
+
+## Outbound email
+
+### 📧 Outbound Email
+
+> 📮 **Three flows send email, and every one of them is switchable without a code change:** the password-reset link, the invite link, and the payslip PDF after a confirmed payroll run. Everything else notifies in-app only (`notifications` table + bell).
+>
+> ### The four files, and what each one is allowed to know
+>
+> | File | Owns | Must not know |
+> |---|---|---|
+> | `config/mailer.js` | *How* to reach a provider (the SendGrid HTTPS call, its timeout, From parsing) | What any message says, or whether it's switched on |
+> | `config/mailFeatures.js` | *Whether* a given flow may send right now (the flag registry) | Templates, recipients, transport |
+> | `utils/mailLayout.js` | The shared HTML/plain-text shell (table layout, button, detail rows, escaping) | Which flows exist |
+> | `services/mailService.js` | *What* each message says, and nothing else | Provider details, flag plumbing |
+>
+> - **Adding an email is three steps, all additive:** (1) an entry in `FEATURE_DEFINITIONS` in `config/mailFeatures.js`, (2) a `sendXEmail` template in `mailService.js` built from the `utils/mailLayout.js` builders, (3) a call from the service that owns the event. The new sender inherits the feature flag, the `MAIL_ENABLED` kill switch, the unconfigured-dev fallback and the never-send-under-test guard for free. **Removing** one from production is an env var (`MAIL_FEATURE_…=false`), never an edit.
+> - **Every template must go through `mailService.js`'s own `dispatch` helper, never `sendMail` directly.** That helper is the only thing enforcing the flag, and a flag check one line away from a send is exactly what goes missing on the fourth email someone adds.
+> - **Flags are read from `process.env` on every send, not captured at import time** — they're operational switches (flip, restart, done) and the tests toggle them per case. A blank or unrecognized value falls back to the feature's default; it must never read as "off" (a declared-but-empty var is the most common `.env` state, and silently disabling password recovery over it would be the worst possible reading). Unknown feature *keys* throw — a typo must not mean "this email quietly stopped existing".
+> - **`config/mailer.js` is the only module that knows a mail provider exists, and the swap it predicted has now happened.** It exports `sendMail({ to, subject, text, html, attachments })` and `isMailConfigured()` — deliberately **not** a client or transport object. That deviation from the `config/cloudinary.js` precedent (which exports a configured *client*) is what made the provider change a **one-file** change: nodemailer/Gmail SMTP became a `fetch` POST to SendGrid's v3 API, and `mailService.js`, `mailFeatures.js`, `mailLayout.js` and every caller were untouched. Keep it that way. `{ to, subject, text, html }` is the exact intersection of SendGrid's, Resend's and nodemailer's send calls — not an invented abstraction — so **still don't add `cc`/`bcc` speculatively**; that's precisely where providers diverge.
+> - **No provider SDK, on purpose.** SendGrid's send endpoint is one JSON POST and `fetch` is global in Node 18+, so `@sendgrid/mail` would add a dependency and buy nothing. That's not just tidiness: an uncommitted `nodemailer` entry in `server/package.json` once crashed the Render deploy at boot, because a top-level import of a package Render never installed kills the process. Zero new dependencies makes that failure mode unreachable.
+> - **`attachments` is the one key that is *not* a free intersection, and was added only once the payslip PDF needed it.** All three providers take `{ filename, content }`, but nodemailer wants a Buffer plus `contentType`, Resend takes a Buffer or base64, and SendGrid demands base64 plus `type`. Callers therefore hand over `{ filename, content: Buffer, contentType }` and `mailer.js` maps it — keep that mapping explicit (not a spread of the caller's object) so the provider swap stays a one-file change. Attachment *contents* are never logged.
+> - **`sendMail` returns `true` only when the message actually reached the transport**, `false` when the test guard, a missing SMTP config or (via `dispatch`) a flag stopped it. Callers that tell a human "we emailed them" — the invite flow's `emailSent` — depend on that distinction; don't re-derive it from `isMailConfigured()` at a call site.
+> - **`services/mailService.js` is templates only.** It never catches — the caller has the context to decide, same convention as `cloudinaryService.js`. Presentation belongs here too (currency symbols, role labels, pluralization), not in the service that triggered the email.
+> - **Every template ships a plain-text part and a preheader.** A message with no text part is scored as spam and shows as blank in text-only clients; without a preheader Gmail scrapes the first visible line into the inbox preview. Never put a sensitive figure in a preheader — it shows on lock screens, which is why the payslip email's net pay is in the body and not the preview line.
+> - **Email HTML is table-based with inline styles, no remote images, 600px max width** (`utils/mailLayout.js` explains each choice). Mail clients are not browsers: `<style>` blocks get stripped, flex/grid collapse in Outlook, blocked images render as broken boxes. Everything interpolated into HTML goes through `escapeHtml` — names and reasons are user-supplied.
+>
+> ### Per-flow rules that are easy to undo by accident
+>
+> - **Invite links: the window is a security parameter, not a convenience setting.** `INVITE_TOKEN_TTL_HOURS` defaults to **12** (down from 24, because the link is now delivered to an inbox rather than pasted by HR) and is **clamped to 1–72 in code** — an unparseable or absurd value falls back to the default instead of minting a hundred-day credential by typo. The token is stored only as a SHA-256 hash and is single-use (`accepted_at`). Don't shorten it much further without adding a resend endpoint first: the pending account is *deleted* when the link lapses (`deleteExpiredInvitees`) and there is no resend, so an over-tight window means HR re-filling the whole invite form.
+> - **The invite email is awaited; the password-reset email must never be.** Different reasons, both load-bearing: the invite caller is an authenticated HR admin who already knows the account exists (no enumeration risk) and needs `emailSent` to decide whether to fall back to the copyable link. Password reset must stay fire-and-forget — see the three properties below.
+> - **An invite mail failure must never fail the request.** The user row, its leave balances and its invitation row are all committed before the send; throwing would show HR an error beside an employee who *was* created, while the returned `inviteLink` still works. Log it, return `emailSent: false`, and let the UI promote the fallback link.
+> - **Payslip emails are sent after the response, sequentially, one employee at a time.** A run can commit ~200 slips, each needing a PDF render plus an SMTP handshake (~1–3s) — awaiting that would blow the proxy timeout with payroll already committed. Sequential, not parallel: providers throttle per connection and Gmail cuts off near 500 recipients/day, so 200 concurrent handshakes is the shape most likely to get the whole run rejected. Each employee is independent; one bad mailbox drops one email and the loop continues, with a `[payslip-email] period=… sent=… failed=…` summary line at the end.
+> - **The payslip flow re-fetches the slips it just committed** rather than using `replaceSlipsForPeriod`'s `RETURNING` rows: that list is `salary_slips` columns only, and both the PDF and the email need the joined employee name/email/PAN (`SLIP_COLUMNS`). One query for the batch, not one per employee.
+> - **`renderPayslipPdfBuffer` exists alongside `renderPayslipPdf`, not instead of it** — an attachment needs the whole file, while the HTTP download wants a stream it can pipe without buffering. A payroll run buffers one payslip at a time, never all of them.
+> - **Three properties of `requestPasswordReset` exist solely to protect the "same response for known and unknown emails" guarantee. All three are easy to unknowingly undo:**
+>   1. **The send is fire-and-forget (`void … .catch(…)`), never awaited.** An awaited SMTP handshake is ~1-3s for a real account vs milliseconds for an unknown one — a single-request-pair enumeration oracle. This is a security decision, not a performance one.
+>   2. **A delivery failure must never become a 5xx.** Same leak by another route: 500 for real accounts, 200 for unknown ones, during any mail outage. Do not "fix" the `.catch` into a throw.
+>   3. **The 15-minute resend cooldown returns silently**, byte-identical to a normal response.
+> - **`issuePasswordReset` is one atomic SQL statement, replacing a check → invalidate → insert trio that was wrong three ways** — worth knowing before anyone "simplifies" it back:
+>   1. *Clock skew*: `created_at` is written by Postgres into a `timestamp` (no zone) column; comparing it against `Date.now()` in JS silently breaks the cooldown whenever Node and Postgres run in different timezones. `LOCALTIMESTAMP` puts both sides on the DB clock.
+>   2. *TOCTOU*: a separate SELECT-then-INSERT let two concurrent requests both pass and both send.
+>   3. *A 409 enumeration oracle*: concurrent inserts collided on `uq_password_resets_active_user`, and `errorHandler.js` maps 23505 → 409 — so a real address answered 409 where an unknown one answered 200. `ON CONFLICT` makes 23505 unreachable. There's a regression test for this (`passwordReset.test.js`, "never answers 409 for concurrent requests").
+>   Trade-off accepted: superseding a live token overwrites its row rather than stamping `used_at` and inserting a new one, so there's no history of superseded tokens (nothing reads it). Upside: `used_at` now means exactly one thing — "consumed by `confirmPasswordReset`" — and `created_at` means "last issued", which is what the cooldown needs.
+> - **The cooldown is 15 minutes, and the obvious objection to that is wrong.** An attacker hammering the endpoint can't lock a victim out of resetting, because every request they trigger delivers a *working* link to the victim's inbox. So a long window costs a legitimate user nothing while capping abuse at ~96 emails/day/address — which matters because Gmail cuts off at ~500/day. It's deliberately shorter than `RESET_TOKEN_TTL_HOURS` so the already-sent link stays valid across the whole window.
+> - **Still keyed on `user_id`, so it does *not* stop an attacker cycling many known addresses.** That needs IP-level rate limiting, which this app has nowhere (already logged as HIGH in [`docs/architecture/19-reviews.md`](../../docs/architecture/10-performance-execution-and-cheatsheet.md)).
+> - **SendGrid specifics** (see `.env.example`): the API key needs only the **Mail Send** permission; `MAIL_FROM` must be a **verified sender** or every send 403s — Single Sender Verification confirms one address by email and needs no DNS access, while full domain verification needs SPF/DKIM records but delivers better; free tier is ~100 emails/day. Two details differ from the SMTP setup it replaced: **there is no fallback sender** (SMTP could default to `SMTP_USER` because the authenticated mailbox *was* the sender, so a missing `MAIL_FROM` now reads as unconfigured rather than sending as someone else), and **`content` parts must be ordered `text/plain` before `text/html`** or the API 400s. A `202` with an empty body is success; anything else carries an `errors` array, which is the only way to tell a bad key from an unverified sender — `sendMail` surfaces it in the thrown message for exactly that reason.
+> - **Every SendGrid tracking feature is disabled per-send, and that is a security decision as much as a deliverability one.** SendGrid enables **click tracking by default**, which rewrites every `href` into a `sendgrid.net` redirect — so all three of these emails carry a single-use credential (an invite or reset token) and tracking would route it through a third-party redirector, while destroying the only thing that lets a recipient distinguish a real invite from phishing: a visible link to the domain the mail claims to come from. Mismatched link and sender domains are themselves a spam signal. Open tracking embeds a remote 1×1 image, contradicting `mailLayout.js`'s no-remote-images rule for a metric nobody acts on; subscription tracking would append an unsubscribe footer to transactional mail nobody opted into. All three are set in the payload rather than left to the dashboard, so a console toggle can't quietly reintroduce them.
+> - **Landing in spam is an authentication problem, not a content one.** Single Sender Verification proves you own a mailbox and publishes *nothing* to the world, so receivers checking SPF/DKIM for the From domain find nothing authorizing SendGrid — and Gmail has treated unauthenticated mail harshly since 2024. The fix is **Domain Authentication** (SendGrid → Sender Authentication → Authenticate Your Domain): three CNAME records on the sending domain, which set up DKIM signing and an aligned return path. No content or template change substitutes for it. Everything the templates can contribute is already done — a plain-text part alongside the HTML, a preheader, no remote images, no link shorteners.
+>
+> ### Three deployment bugs that all looked like "email is broken" (solved — don't re-introduce)
+>
+> - **SMTP cannot deliver mail from Render at all — don't try to go back to it.** Established by elimination over three failures, in this order. (1) Sends died with `connect ENETUNREACH 2404:6800:…:587`: nodemailer doesn't use `dns.lookup`, it calls `resolve4` and `resolve6` separately, concatenates them and picks one **at random** (`addresses[Math.floor(Math.random() * addresses.length)]`), and `smtp.gmail.com` publishes exactly one A and one AAAA record — a coin flip, and Render has no IPv6 route. It never reached its own `dns.lookup` fallback because that only runs when resolve4 *and* resolve6 both fail. (2) Pinning to an IPv4 literal fixed that and revealed `Connection timeout` on **587**. (3) Port **465** timed out identically. A TCP connect timing out at 5s — when a handshake to Google is one round trip — with a silent drop rather than `ECONNREFUSED` is a firewall, not a slow host. So the transport moved to HTTPS on 443, which isn't blocked. The DNS detail is kept here because it's a nodemailer property, not a Gmail one, and would bite any future SMTP use from a host without IPv6 — but `config/mailer.js` no longer resolves anything.
+> - **Never quote a value in a hosting dashboard's env var.** `MAIL_FROM="Leave Management System <someone@example.com>"` works locally *only* because dotenv strips one matching pair of surrounding quotes. Render (and every other dashboard) stores the value literally, so the quotes become part of it, and nodemailer's address parser then yields the garbage address `"Leave Management System <someone"@example.com>` with an empty display name — which Gmail rejects. Enter it unquoted. Quotes are only ever needed in a `.env` *file*, and only when the value contains a `#` (which dotenv otherwise treats as a comment) or meaningful leading/trailing whitespace.
+> - **An unconfigured SMTP setup in production writes live credentials into log aggregation.** The unconfigured fallback in `sendMail` logs the whole plain-text body, which for the invite and reset flows *contains the link* — so a deploy missing `SMTP_HOST` quietly published working single-use tokens (12h and 1h respectively) to anyone who can read the logs. That fallback is a local-dev convenience and is fine there; the rule is that `isMailConfigured()` must be true in any deployed environment, and that these logs are secrets until it is. Note `isMailConfigured()` checks host **and** user **and** password together — two out of three still reads as unconfigured, which is exactly how this happened.
+
+---
+
+---
+
+## Pagination & count endpoints
+
+### 📄 Pagination & Count Endpoints
+
+> The app was audited for unpaginated list endpoints against NFR-7 ("responsive with 200 employees and three years of requests"). At that scale a leave-request row is ~0.7KB of JSON, so a company-wide request history is **thousands of rows and several megabytes**. Two classes of problem came out of it; this section records the rules that came with fixing them.
+
+#### Never fetch a list to derive a number from it
+
+- **A count belongs in its own endpoint.** `GET /notifications/unread-count` was the existing example; `GET /leave-requests/pending-count` and `GET /users/me/team/count` were added for the same reason. Before them, the sidebar's Approvals badge downloaded the caller's entire team request history **on every page load** to display one integer, and the dashboard tile did the same plus a full 200-row subtree of users for a headcount.
+- **The rule the client used to apply after downloading must move server-side unchanged.** `countPendingDecisions` is deliberately the same rule as `canDecideDirectly` was on the client: the employee's assigned manager is the caller, or a manager the caller is an active delegate for. A count that's fast and wrong is worse than the slow list it replaced, so the integration tests pin the *scoping*, not the performance.
+- **Scope helpers get extracted, not copied.** `teamScopedEmployeeIds` in `leaveRequestService.js` is shared by `listTeamLeaveRequests` and `listOnLeaveToday` precisely so a dashboard tile and an approvals list can't drift into disagreeing about who's on the team.
+- **These endpoints take no role gate.** They're scoped server-side exactly like `/team`, so an employee with nothing in scope gets `0`/`[]` rather than a `403` — same reasoning as `/team` itself.
+- **`TeamOverviewSummary` has a regression test for this** ("never fetches a request list or the full team roster"). If a tile ever needs one more number, add another count endpoint; don't reach for the list.
+
+#### One pagination idiom, copied from notifications
+
+- **Contract:** `limit`/`offset` query params, validated with `z.coerce.number()` (query strings are always strings), **defaulted** so a caller that asks for no page still gets a bounded one, and **capped** (`max(100)`) so nobody can request the whole table with `limit=100000`. Response is an envelope — `{ requests, total }` for leave requests, `{ notifications, total }` for notifications — never a bare array.
+- **`total` is counted with the same WHERE as the page.** `buildFilteredWhere` in `leaveRequestRepository.js` exists so the list query and the count query cannot disagree about what they're counting. Don't inline the conditions into one of them.
+- **Paginating without a supporting index is theatre.** A `LIMIT 25` over `WHERE employee_id = ANY(...) ORDER BY start_date DESC` still sorts the entire matching set unless an index provides that order — hence migration 037's `(employee_id, start_date DESC)`. Any new paginated list needs the same check, plus its `docs/3.db.md` entry.
+- **Client side:** page size lives next to the fetch (`PAGE_SIZE`, currently 25 on both paginated screens), the pager renders only when `total > PAGE_SIZE` (a lone disabled prev/next pair is noise), and **applying or clearing a filter resets `offset` to 0** — a narrower filter can have fewer rows than the current offset, which renders an empty table that reads as "no matches".
+- **`limit`/`offset` are optional at the repository layer, on purpose.** `findLeaveRequestsFiltered` omits them for callers that want the whole (already narrow) result set — `listOnLeaveToday`'s "approved, overlapping today". Applying a silent default cap there would truncate a caller that wasn't expecting pages.
+
+#### The window-or-page rule (team/approvals lists)
+
+- **`GET /leave-requests/team` and `/all` take either a page or a window, never neither.** A page (`limit`/`offset`) for the list; a window (`startDate`+`endDate`) for the calendar, which needs a whole month at once — page 1 of a busy team is not "this month", and paginating the single fetch these screens used to share would have silently hidden calendar events.
+- **A window is bounded by its own span, so it takes no `limit`** — but only because both dates are required together and the span is capped at 62 days (`MAX_WINDOW_DAYS`). Drop that cap and the window becomes the unbounded query the pagination existed to remove.
+- **`ApprovalsPage` therefore makes two calls**, and `TeamLeaveCalendar` reports its visible grid (`activeStart`/`activeEnd`, guarded against re-notifying the same range) rather than just its year. Paging the list never refetches the calendar.
+- **`findTeamLeaveRequests` replaced both `findLeaveRequestsForEmployees` and `findAllLeaveRequests`** — they only ever differed in whether an employee filter was applied, and `undefined` employeeIds already meant "no restriction" elsewhere in the file.
+
+#### Slim projections beat pagination for bounded-but-wide lists
+
+- **`GET /users/options` exists because four dropdowns were fetching ~40 columns × 200 users** to render a name. The list is bounded by headcount, so pagination was the wrong tool — a five-column projection cuts ~90% with no UI change. `GET /users` stays for the All Employees roster, which genuinely displays those fields.
+- **Reach for a projection first** when a list is bounded by headcount and wide; reach for pagination when it's unbounded by time.
+
+#### Still unpaginated, and known
+
+Everything from the original audit is now done: the count endpoints, HR's browse view, the Approvals list + calendar split, `GET /salary-slips`, and the slim `GET /users/options`. What remains is bounded by headcount or by leave-type count and is fine as-is: `/leave-types`, `/holidays` (year-scoped), `/leave-balances/me`, `/employees/:id/documents`, `/delegations/*`, `/leave-requests/:id/audit`, every `/mine` endpoint, and `/report` + `/report/csv` (aggregated to one row per employee — and a CSV export *should* cover everything).
+
+---
+
+---
+
+## Who sees what
+
+### 🚪 Who Sees What (access changes, direct requests)
+
+> Three access decisions taken together, all on direct request. The per-endpoint matrix is [`docs/7.role_permissions_matrix.md`](../../docs/7.role_permissions_matrix.md) — **that file is the source of truth and must be updated with any further change**; this section records *why*, so none of it gets "fixed" back.
+
+#### Company-wide views belong to SUPER_ADMIN, not HR
+
+- **All Employees** (`/dashboard/employees`) is `SUPER_ADMIN`-only, and **All Requests** (`GET /leave-requests/all`) now 403s for `HR_ADMIN`. An HR admin's view of both people and leave is their own branch: My Team, and the team-scoped approvals list.
+- **`GET /leave-requests/all` was narrowed, not scoped, and that was deliberate.** Scoping it to the caller's subtree would have returned byte-identical rows to `GET /team`'s HR branch — a second name for the same list, and a tab in the UI that did nothing. Removing HR's access instead leaves exactly one way for HR to see leave.
+- **`GET /leave-requests/:id` had to move with it.** An HR admin who can't see another branch's requests in a list shouldn't be able to fetch one by id — so that check is now subtree-scoped for `HR_ADMIN` while staying company-wide for `SUPER_ADMIN`, which is what keeps every row of SUPER_ADMIN's own list openable. `/:id/audit`, `/:id/document` and `/:id/document/download` all piggyback on it and moved for free.
+- **`GET /users` was deliberately *not* narrowed.** HR still needs a company-wide user list for the invite form's manager picker and the payroll/slip filters, so the restriction is on the page, not the endpoint. Don't "finish the job" by scoping `listUsersFor` — it breaks both of those.
+- **Two client details exist only because of this**, and both are the kind of thing that silently 403s a user if forgotten: `AddEmployeePage`'s back link points at My Team for HR (All Employees would bounce them to `/403`), and `notificationRouting`'s `INVITE_ACCEPTED` target moved from All Employees to My Team for the same reason. **Any new link to `/dashboard/employees` needs the same thought.**
+- **`ApprovalsPage`'s two role flags are now opposite roles and must stay separate:** `canOverride` is `HR_ADMIN` (SUPER_ADMIN can never override), `canSeeAllRequests` is `SUPER_ADMIN`. They used to be one flag; merging them again gives HR a dead tab or SUPER_ADMIN buttons the server refuses.
+
+#### Dashboard, and SUPER_ADMIN's two different scopes
+
+- **"On leave today" is a table (`OnLeaveTodayTable.jsx`), rendered identically for every role that sees it** — a super admin reading the whole company and an HR admin reading their own branch get the same columns, on direct request. It was a `<ul>` of wrapped chips, which stopped lining up once more than a couple of people were out.
+- **`TeamOverviewSummary` has exactly one role branch: which endpoint feeds it.** `SUPER_ADMIN` reads `GET /leave-requests/all` (the company-wide list it alone may fetch); everyone else reads `/team`. Without that branch the super admin saw an almost-empty "on leave today" next to a whole-company headcount — because `getMyTeam()` is already company-wide for the root (a transitive subtree walk) while its *leave* scope is direct-report HR admins only. If you touch either, keep the two agreeing.
+- **`SUPER_ADMIN`'s reporting scope is deliberately wider than its HR-write scope** (`reportableEmployeeIds` in `leaveRequestService.js`): `undefined`, i.e. no employee restriction, for `GET /leave-requests`, `/report` and `/report/csv`. Reusing `getHrScopedEmployeeIds` there would limit the one role that can already read every request to a report on its direct-report HR admins. Both repository functions treat `undefined` as "no filter" and `[]` as "nobody" — **never return `[]` from that helper for the super admin**, or every report silently comes back empty.
+
+#### One colour per leave type
+
+- `utils/leaveTypeAccents.js` maps `leave_type_id` → an accent from `LEAVE_BALANCE_ACCENTS`, **cycled by position in the caller's balance list, not hashed from the name**: six accents against typically five types means a hash would eventually give two types the same colour, which reads as a bug. Keyed on the id because a type's *name* is editable — renaming one would otherwise recolour its whole history.
+- Both the dashboard's My leave tile and the My Leave page's balance cards go through it, so a type is the same colour in both. The page previously indexed `LEAVE_BALANCE_ACCENTS` directly; that produced the same colours, but only by coincidence of iterating the same array.
+- **The My leave tile is a leave-type `<select>` plus that type's own history**, not a row of one chip per type: at five types the chip row wrapped onto three lines and still only said "days left". "All leave types" is the default and keeps the chip row (now clickable, each chip selecting its own type). A row shows the dates, days, status and — the point of it — the decision comment, since a rejection without its reason is the least useful row on the page.
+
+#### Managing a person: creator **or** in-my-scope (server), HR-tier (client)
+
+- `changeManager`/`changeStatus` accept the actor if **either** they are the target's `invited_by` **or** `isInActorsHrScope(actor, id)` is true. Creator-alone was the original rule; widened because it left an HR admin with **no controls at all** for anyone they'd inherited rather than invited (a colleague's joiner, or any account predating the invitation records) — which is what "add the icons for HR in My Team" turned out to be about. The icons were always there; the gate was never satisfied.
+- **The boundary that matters is unchanged:** a subtree walk never goes sideways or upward, so another branch's people stay unreachable, and `SUPER_ADMIN` still can't be re-parented or deactivated from below (nobody's subtree contains the root). That protection used to be a side effect of the "no `invited_by`" rule and is now explicit.
+- **`EmployeePersonRow`'s client gate is the simpler `HR-tier` check, not a mirror of the service rule** — deliberately, and settled on direct request. The routes are HR-tier gated, so a `MANAGER` is offered neither control on any row (a client that offered one would just produce a 403); and since actions only render on My Team — the viewer's own subtree by construction — scope is already satisfied for every row an HR-tier viewer sees there, so re-checking `invited_by` would only re-hide the inherited-account case the widening existed to fix. **Don't "tighten" the client back to `creator`, and don't loosen the routes to admit managers** unless that's a fresh decision: re-parenting moves someone out of your team and deactivating ends their session, both HR-desk actions.
+
+#### Applying for leave is a page under My Leave, never a modal
+
+- The sidebar's **Apply Leave** entry is gone; the only way in is My Leave's own "Request Leave" button, and the route moved to `/dashboard/my-leave/apply-leave`.
+- **The modal on My Leave was deleted, not hidden.** `MyBalancesPage` no longer imports `Modal`/`RequestLeaveForm` and has no submit handler at all: `ApplyLeavePage` navigates back with the new request's start date in router state, which the page's own `initialFocusDate` picks up on its fresh mount. That's also why `focusDate` is now a read-only `useState` with no setter.
+- **Don't reintroduce a modal or a query-param version of this.** The original `/dashboard/my-leave?apply=1` did nothing when clicked from My Leave itself — a search-only navigation doesn't remount the component, so the lazy state that read the flag never re-ran. A nested route always mounts fresh.
+
+---
+
+---
+
+## Document preview, verification & payroll guards
+
+### 🧾 Document Preview, Profile Verification & Payroll Guards
+
+> Four bugs found in live use of Module 5 v2, with the root cause of each — worth knowing before "simplifying" any of these back.
+
+#### Cloudinary raw assets can't be previewed — only proxied
+
+- **Symptom:** HR clicking "View" on an employee's PDF document downloaded the file instead of showing it, with no way to just read it.
+- **Root cause:** PDFs are uploaded with `resource_type: "raw"` (`cloudinaryService.uploadPrivateAsset` — anything not an image is raw), and Cloudinary serves raw assets with `Content-Disposition: attachment`. An `<iframe src={signedUrl}>` therefore triggers a save, not a render. There is no URL flag that makes a raw asset inline; the disposition belongs to whoever serves the bytes.
+- **Fix:** `GET /api/employees/documents/:documentId/file` streams the bytes through this app (`employeeDocumentService.getDocumentFile` → `fetchDocumentStream`), setting `Content-Type` from the stored `mime_type` and `Content-Disposition` from a `disposition` query param that defaults to **`inline`**. `DocumentViewerPage` renders from that URL, never from `previewDocument.url`. The `/url` endpoints now also return `documentId` so the viewer can build it.
+- **Consequences worth keeping:** the signed URL never reaches the DOM, and its five-minute expiry stops mattering to a viewer left open (each request mints a fresh one). Same trick as the salary-slip PDF endpoint's `?disposition=inline`, which existed for exactly this reason on a same-origin stream.
+- **If you add another document kind:** it needs the same proxy, not a signed URL in an `iframe`. Images happen to work either way (`<img>` doesn't care about disposition) — don't let that mislead you into thinking the URL is previewable in general.
+
+#### Verifying a profile requires every document to be verified first
+
+- **Symptom:** HR could mark a profile `VERIFIED` while its documents sat unreviewed — or after rejecting one — making the per-document review step decorative.
+- **Fix:** `userService.verifyProfile` calls `assertRequiredDocumentsVerified` (in `employeeDocumentService.js`, which owns document rules) after the state-machine check, so "already verified" still answers **409** while a document problem answers **400**. Two distinct messages, because they need different actions from HR: a `PENDING_REVIEW` document is theirs to review now; a `REJECTED` one can only be fixed by the employee, so the way forward is `send-back`, not another `verify`.
+- **The loop closes on the employee's side too:** `submitProfileForVerification` calls `assertNoRejectedDocuments`, so a profile sent back over a bad document can't be resubmitted unchanged — re-uploading resets the row to `PENDING_REVIEW` (`upsertEmployeeDocument`), which is what "replaced" means here. Without this, resubmitting just handed HR the same blocked Verify button.
+- **Custom (`OTHER`) documents are never part of the gate** — they're optional extras, and any number may exist.
+- **Error messages name the documents**, which is why `employeeDocumentService.js` carries its own `DOCUMENT_TYPE_LABELS`. The client has a separate copy for its list UI; that duplication is deliberate (messages are composed server-side).
+- **Tests that verify a profile need `verifyAllEmployeeDocuments(employeeId, reviewerId)`** (`helpers/factories.js`) as setup, rather than driving four review requests each. Tests of the review endpoint itself still go through HTTP.
+
+#### A payslip is never issued for zero net pay
+
+- **Root cause of the bug:** nothing checked the computed figure, so a full month of unpaid leave — or configured deductions (PF + ESIC + income tax) meeting or exceeding earnings — produced a real `₹0` payslip.
+- **Why that's worse than no payslip:** it reads to the employee as "you were paid ₹0", and it occupies the `(employee, pay_period)` slot, so the corrected run has to void it first.
+- **Fix:** `computeSlip` returns `status: "skipped"` when `netPay <= 0` (`<=`, not `===` — negative is the same case, and rounding means exact zero isn't guaranteed), keeping `computed` populated so HR can see *why* it came to zero.
+
+#### "Already received" is a preview status, not a confirm-time surprise
+
+- **Symptom:** the run preview showed **Ready** for an employee who already had an `ACTIVE` slip for that period; they were then silently skipped on approve.
+- **Root cause:** the duplicate check lived only in `confirmPayroll`, after the preview HR had already read.
+- **Fix:** `calculateForSubtree` resolves the period's existing `ACTIVE` slips in one query up front and tags those rows `status: "already_generated"` with `computed: null` (recomputed figures would differ from the slip the employee actually keeps). The client badges it neutrally — "Already received" — not amber like a real problem, and the summary line says how many, so "0 of 12 payroll-ready" doesn't read as a failure.
+- **Row statuses are now three:** `ok`, `skipped`, `already_generated`, with `ok + skipped + alreadyGenerated === total`. Anything filtering rows must use `!== "ok"` rather than `=== "skipped"`, or the new status silently vanishes — `confirmPayroll`'s `skipped` list was exactly that bug waiting to happen.
+- **`ALREADY_GENERATED_REASON` is one shared constant** because both the preview and `confirmPayroll`'s race backstop report it; two wordings for one condition makes the UI look like it's describing two different problems.
+- **A `VOIDED` slip deliberately doesn't count**, so voiding returns the employee to `ok` and reopens the period — that's the whole correction path.
+
+---

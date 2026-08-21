@@ -35,11 +35,12 @@ Start with whichever question you're actually asking.
 | **deploy it, or fix a deployment** | [`docs/8.deployment_and_operations/`](docs/8.deployment_and_operations/README.md) |
 | **know what's built and what isn't** | [`docs/1.functional_requirements/`](docs/1.functional_requirements/README.md) · [`docs/4.non_functional_requirements.md`](docs/4.non_functional_requirements.md) |
 | **know what's tested** | [`docs/5.test_cases/`](docs/5.test_cases/README.md) |
+| **know the security posture** | [`docs/9.security/`](docs/9.security/README.md) — controls, findings, and a pre-merge checklist |
 | **change something** | [`.claude/rules.md`](.claude/rules.md) — the project's binding rules |
 
-> 📏 **No document here exceeds 400 lines.** Anything longer is a folder with an index and one file per concern. The
-> rule, and how to split safely, is in
-> [`.claude/rules/10-workflow-and-documentation.md`](.claude/rules/10-workflow-and-documentation.md).
+> 📏 **No document here exceeds 400 lines, and none is trivially short either.** Anything longer is a folder with
+> an index; anything that was too short got merged with its neighbours. Both halves of that rule are in
+> [`.claude/rules/04-workflow-deployment-and-claude.md`](.claude/rules/04-workflow-deployment-and-claude.md).
 
 ## Shape of the thing
 
