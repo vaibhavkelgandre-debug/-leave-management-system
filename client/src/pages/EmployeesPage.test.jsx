@@ -61,6 +61,19 @@ describe("EmployeesPage", () => {
         expect(screen.queryByRole("button", { name: /deactivate|activate/i })).not.toBeInTheDocument();
     });
 
+    // Counterpart to My Team's "drops the Phone column" test: this page has no
+    // Actions column, so it has the width to keep Phone and does.
+    it("keeps the Phone column, which only My Team drops", async () => {
+        const self = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN, phone: "+91 90000 00001" });
+        userService.getUsers.mockResolvedValue([self]);
+
+        renderWithProviders(<EmployeesPage />, { authValue: hrAuthValue });
+        await screen.findByText("Priya User");
+
+        expect(screen.getAllByRole("columnheader", { name: /phone/i }).length).toBeGreaterThan(0);
+        expect(screen.getByText("+91 90000 00001")).toBeInTheDocument();
+    });
+
     it("marks the logged-in user's own row with a \"You\" badge, and no one else's", async () => {
         const self = makeUser({ id: "hr-viewer", first_name: "Priya", role: ROLES.HR_ADMIN });
         const other = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer" });

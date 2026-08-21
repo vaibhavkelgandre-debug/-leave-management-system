@@ -296,6 +296,23 @@ describe("TeamPage", () => {
         });
     });
 
+    // The Phone column is dropped on this page only (EmployeesPage keeps it) —
+    // these tables carry an Actions column and a second Status badge on top of
+    // everything All Employees shows, which was enough to need a horizontal
+    // scrollbar to reach the action icons at all.
+    it("drops the Phone column, so the action icons stay reachable without scrolling sideways", async () => {
+        const employee = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer", phone: "+91 90000 00001" });
+        userService.getMyTeam.mockResolvedValue([employee]);
+
+        renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
+        await screen.findByText("Zara User");
+
+        expect(screen.queryByRole("columnheader", { name: /phone/i })).not.toBeInTheDocument();
+        expect(screen.queryByText("+91 90000 00001")).not.toBeInTheDocument();
+        // The columns that stayed.
+        expect(screen.getByRole("columnheader", { name: /email/i })).toBeInTheDocument();
+    });
+
     describe("activate/deactivate restriction", () => {
         it("shows the activate/deactivate control for an employee the viewer created", async () => {
             const employee = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer", invited_by: "hr-viewer" });
@@ -326,6 +343,30 @@ describe("TeamPage", () => {
             const zaraRow = within((await screen.findByText("Zara User")).closest("tr"));
 
             expect(zaraRow.getByRole("button", { name: /deactivate/i })).toBeInTheDocument();
+        });
+
+        // An invited account isn't deactivatable — `updateStatus` moves a row
+        // between ACTIVE and INACTIVE and INVITED is neither — but the control
+        // still renders, disabled, rather than being left out: omitting it made
+        // the row's remaining icon slide into the empty slot, so the two
+        // controls appeared in different places from one row to the next.
+        it("renders the deactivate control disabled on an invited row, keeping the icon columns aligned", async () => {
+            const invited = makeUser({ id: "emp-1", first_name: "Zara", manager_id: "hr-viewer", status: "INVITED" });
+            const active = makeUser({ id: "emp-2", first_name: "Yusuf", manager_id: "hr-viewer" });
+            userService.getMyTeam.mockResolvedValue([invited, active]);
+
+            renderWithProviders(<TeamPage />, { authValue: hrAuthValue });
+            const invitedRow = within((await screen.findByText("Zara User")).closest("tr"));
+            const activeRow = within(screen.getByText("Yusuf User").closest("tr"));
+
+            const invitedToggle = invitedRow.getByRole("button", { name: /deactivate/i });
+            expect(invitedToggle).toBeDisabled();
+            expect(invitedToggle).toHaveAccessibleName(/available once Zara accepts the invite/i);
+            // Same two controls, same order, on a row where both are live.
+            expect(activeRow.getByRole("button", { name: /^deactivate$/i })).toBeEnabled();
+            for (const row of [invitedRow, activeRow]) {
+                expect(row.getAllByRole("button")).toHaveLength(2);
+            }
         });
     });
 });

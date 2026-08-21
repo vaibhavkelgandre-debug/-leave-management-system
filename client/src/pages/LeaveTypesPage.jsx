@@ -46,12 +46,13 @@ function LeaveTypeRow({ leaveType, onChanged, onEdit }) {
             </td>
             <td className="px-4 py-3">
                 <div className="flex items-center gap-1">
-                    <IconButton icon={Pencil} label="Edit" onClick={() => onEdit(leaveType)} />
+                    <IconButton icon={Pencil} label="Edit" tooltipPortal onClick={() => onEdit(leaveType)} />
                     <IconButton
                         icon={leaveType.is_active ? UserX : UserCheck}
                         label={leaveType.is_active ? "Deactivate" : "Activate"}
                         variant={leaveType.is_active ? "danger" : "success"}
                         loading={busy}
+                        tooltipPortal
                         onClick={handleToggleStatus}
                     />
                 </div>

@@ -68,6 +68,7 @@ export function LeaveRequestTable({ requests }) {
                                         icon={Info}
                                         label="Details"
                                         size="sm"
+                                        tooltipPortal
                                         onClick={() => setDetailRequest(request)}
                                     />
                                 </td>

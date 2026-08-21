@@ -24,6 +24,11 @@ import { IconButton } from "../ui/IconButton.jsx";
 // see the note in rules.md for why this isn't silently un-reverting itself.
 // Output: nothing directly — renders the buttons legal for the request's
 // current status and this viewer, or nothing if none are.
+// Every `iconOnly` button passes `tooltipPortal`: the one call site that uses
+// it is a TeamRequestList row, inside a `Card overflow-hidden` with no table
+// header above the first row, so a default CSS-absolute tooltip on that row
+// was clipped off at the card's top edge. Portal mode is safe anywhere, so
+// it's unconditional rather than another prop threaded down.
 export function RequestActions({ request, canOverride, onChanged, iconOnly = false }) {
     const { user } = useAuth();
     const [busy, setBusy] = useState(false);
@@ -82,6 +87,7 @@ export function RequestActions({ request, canOverride, onChanged, iconOnly = fal
                                 variant="success"
                                 size="sm"
                                 loading={busy}
+                                tooltipPortal
                                 onClick={() => runAction(() => approveLeaveRequest(request.id))}
                             />
                             <IconButton
@@ -90,6 +96,7 @@ export function RequestActions({ request, canOverride, onChanged, iconOnly = fal
                                 variant="danger"
                                 size="sm"
                                 loading={busy}
+                                tooltipPortal
                                 onClick={() => setShowRejectComment((prev) => !prev)}
                             />
                         </>
@@ -124,6 +131,7 @@ export function RequestActions({ request, canOverride, onChanged, iconOnly = fal
                             variant="danger"
                             size="sm"
                             loading={busy}
+                            tooltipPortal
                             onClick={() => setOverrideTarget((prev) => (prev === "REJECTED" ? null : "REJECTED"))}
                         />
                     ) : (
@@ -146,6 +154,7 @@ export function RequestActions({ request, canOverride, onChanged, iconOnly = fal
                             variant="success"
                             size="sm"
                             loading={busy}
+                            tooltipPortal
                             onClick={() => setOverrideTarget((prev) => (prev === "APPROVED" ? null : "APPROVED"))}
                         />
                     ) : (

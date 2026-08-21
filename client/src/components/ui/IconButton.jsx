@@ -14,6 +14,14 @@ const SIZE_CLASSES = {
     md: "h-9 w-9",
 };
 
+// `tooltipPortal` forwards Tooltip's own `portal` mode. Needed for any icon
+// button inside a table row: the row sits in an `overflow-x-auto` wrapper
+// inside an `overflow-hidden` Card, and the default CSS-absolute tooltip
+// interacts with that badly in two ways — it gets clipped at the Card's edge,
+// and, being laid out in the document, its `whitespace-nowrap` box counts
+// toward the wrapper's `scrollWidth`, so a table that otherwise fits exactly
+// still shows a horizontal scrollbar for a label nobody can see. A portalled
+// tooltip is in `document.body`, so it does neither.
 export function IconButton({
     icon: Icon,
     label,
@@ -22,11 +30,12 @@ export function IconButton({
     loading = false,
     disabled = false,
     tooltipPosition = "top",
+    tooltipPortal = false,
     className = "",
     ...rest
 }) {
     return (
-        <Tooltip label={label} position={tooltipPosition} className="inline-flex shrink-0">
+        <Tooltip label={label} position={tooltipPosition} portal={tooltipPortal} className="inline-flex shrink-0">
             <button
                 type="button"
                 aria-label={label}

@@ -35,6 +35,24 @@ const ALLOWED_MANAGER_ROLES = {
 
 const tdClasses = "px-3 py-3 align-top text-sm text-slate-700";
 
+// Badge cells get 4px of left padding instead of the usual 12px, so that the
+// badge's own `px-2` makes up the difference and its *text* starts exactly
+// where the column heading's does. With a flat `px-3` everywhere the pill's
+// padding stacked on the cell's and every badge column read as indented ~8px
+// relative to its heading, which is what made the whole table look subtly
+// misaligned next to the plain-text columns.
+const badgeTdClasses = "py-3 pr-3 pl-1 align-top text-sm text-slate-700";
+
+// One action control's footprint, matching IconButton's own `md` size. Rendered
+// in place of a control the viewer can't use so the remaining icons stay in
+// their own column: every row's "change manager" button lines up with every
+// other row's, and likewise for activate/deactivate. Without it the flex row's
+// `justify-end` slid a lone pencil into the status toggle's position, so the
+// two controls appeared to swap places from row to row.
+function ActionSlot() {
+    return <span className="h-9 w-9 shrink-0" aria-hidden="true" />;
+}
+
 function dash(value) {
     return value || "—";
 }
@@ -52,6 +70,7 @@ export function EmployeePersonRow({
     showReportsTo = false,
     showActions = true,
     showProfileStatus = false,
+    showPhone = true,
     highlighted = false,
     columnCount = 1,
 }) {
@@ -82,6 +101,7 @@ export function EmployeePersonRow({
     const fullName = `${user.first_name} ${user.last_name}`;
     const isSelf = user.id === currentUser.id;
     const isActive = user.status === "ACTIVE";
+    const isInvited = user.status === "INVITED";
     // One flag, two controls: they've always had identical permissions, and
     // two names that could drift apart was the more confusing shape.
     const canEditManager = canManagePeople;
@@ -159,10 +179,10 @@ export function EmployeePersonRow({
             </td>
             <td className={tdClasses}>{dash(user.designation)}</td>
             <td className={tdClasses}>{dash(user.department)}</td>
-            <td className={tdClasses}>
+            <td className={badgeTdClasses}>
                 <RoleBadge role={user.role} />
             </td>
-            <td className={tdClasses}>
+            <td className={badgeTdClasses}>
                 <div className="flex flex-wrap items-center gap-1.5">
                     <StatusBadge status={user.status} />
                     {showProfileStatus && user.profile_status && (
@@ -171,30 +191,54 @@ export function EmployeePersonRow({
                 </div>
             </td>
             <td className={tdClasses}>{user.email}</td>
-            <td className={tdClasses}>{dash(user.phone)}</td>
+            {showPhone && <td className={tdClasses}>{dash(user.phone)}</td>}
             {showReportsTo && (
                 <td className={tdClasses}>{manager ? `${manager.first_name} ${manager.last_name}` : "—"}</td>
             )}
             {showActions && (
                 <td className={`${tdClasses} text-right whitespace-nowrap`}>
+                    {/* Two fixed slots, always both rendered, so the icons form
+                        two straight columns down the table instead of drifting
+                        with however many controls a given row happens to offer.
+                        Order is fixed too: change-manager first, status second. */}
                     <div className="flex shrink-0 items-center justify-end gap-1">
-                        {canEditManager && !isEditingManager && (
-                            <IconButton icon={Pencil} label="Change manager" onClick={startEditing} />
+                        {canEditManager && !isEditingManager ? (
+                            <IconButton icon={Pencil} label="Change manager" tooltipPortal onClick={startEditing} />
+                        ) : (
+                            <ActionSlot />
                         )}
                         {/* Your own row keeps showing this (disabled) even though
                             you didn't "create yourself" — deactivating yourself is
                             already independently blocked below, and hiding it
                             entirely here would read as a missing control rather
-                            than an intentional one. */}
-                        {user.status !== "INVITED" && (isSelf || canEditStatus) && (
+                            than an intentional one. An invited-but-not-yet-joined
+                            account gets the same treatment for the same reason,
+                            and it's genuinely not actionable yet: `updateStatus`
+                            moves a row between ACTIVE and INACTIVE, and INVITED
+                            is neither — the account only becomes deactivatable
+                            once the person accepts and turns ACTIVE. Showing the
+                            control greyed out says "this will be here" where an
+                            absent icon just looked like a hole in the column. */}
+                        {isInvited || isSelf || canEditStatus ? (
                             <IconButton
-                                icon={isActive ? UserX : UserCheck}
-                                label={isSelf ? "You cannot deactivate your own account" : isActive ? "Deactivate" : "Activate"}
-                                variant={isActive ? "danger" : "success"}
+                                icon={isInvited || isActive ? UserX : UserCheck}
+                                label={
+                                    isInvited
+                                        ? `Deactivate — available once ${user.first_name} accepts the invite`
+                                        : isSelf
+                                          ? "You cannot deactivate your own account"
+                                          : isActive
+                                            ? "Deactivate"
+                                            : "Activate"
+                                }
+                                variant={isInvited || isActive ? "danger" : "success"}
                                 loading={statusSaving}
-                                disabled={isSelf}
+                                disabled={isInvited || isSelf}
+                                tooltipPortal
                                 onClick={toggleStatus}
                             />
+                        ) : (
+                            <ActionSlot />
                         )}
                     </div>
                 </td>
@@ -230,8 +274,8 @@ export function EmployeePersonRow({
                                 currentUserId={currentUser.id}
                             />
                         </div>
-                        <IconButton icon={Check} label="Save" variant="primary" loading={saving} onClick={saveManager} />
-                        <IconButton icon={X} label="Cancel" variant="ghost" onClick={cancelEditing} />
+                        <IconButton icon={Check} label="Save" variant="primary" loading={saving} tooltipPortal onClick={saveManager} />
+                        <IconButton icon={X} label="Cancel" variant="ghost" tooltipPortal onClick={cancelEditing} />
                     </div>
                 </td>
             </tr>

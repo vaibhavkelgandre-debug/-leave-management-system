@@ -64,7 +64,11 @@ function RequestRow({ request, canOverride, onChanged, onViewDetails, viewerId, 
                     {!readOnly && (
                         <RequestActions request={request} canOverride={canOverride} onChanged={onChanged} iconOnly />
                     )}
-                    <IconButton icon={Info} label="Details" size="sm" onClick={() => onViewDetails(request)} />
+                    {/* `tooltipPortal`: this list's `Card` is `overflow-hidden`,
+                        and with no thead above the first row there's nothing for
+                        a `top` tooltip to sit over — the first row's labels were
+                        being clipped off at the card's top edge entirely. */}
+                    <IconButton icon={Info} label="Details" size="sm" tooltipPortal onClick={() => onViewDetails(request)} />
                 </div>
             </div>
         </li>

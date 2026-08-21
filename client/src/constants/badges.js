@@ -26,7 +26,16 @@ export const STATUS_BADGE_CLASSES = {
     VOIDED: "bg-red-100 text-red-700",
 };
 
-export const BADGE_BASE_CLASSES = "rounded-full px-2 py-0.5 text-xs font-medium";
+// `whitespace-nowrap` is load-bearing, not cosmetic: a `<span>` is an inline
+// box, so a two-word label ("Super Admin") in a narrow table column broke
+// across two lines and the pill's rounded background broke with it — one
+// half-pill above another, which read as a rendering glitch rather than a
+// badge. Keeping it on one line makes the label part of the column's
+// min-content width instead, so the column widens to fit it. Deliberately
+// not also setting a `display` here: TeamRequestList.jsx passes `flex` in
+// via `className`, and two competing display utilities in one class string
+// resolve by stylesheet order, not by the order they're written.
+export const BADGE_BASE_CLASSES = "rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap";
 
 export const ROLE_LABELS = {
     SUPER_ADMIN: "Super Admin",

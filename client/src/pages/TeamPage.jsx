@@ -18,6 +18,13 @@ import { RoleBadge } from "../components/ui/Badge.jsx";
 // also why the invite action moved here for them (see `canInvite` below). The
 // profile_status badge (`showProfileStatus`) is likewise only turned on
 // here, so HR can tell at a glance who on their team is already verified.
+//
+// Those two extra columns are also why `showPhone` is off here and nowhere
+// else: an Actions column plus a second Status badge pushed this page's tables
+// past the content width at 1280px with the sidebar expanded, and a table you
+// have to scroll sideways to reach the action icons in is the worst place to
+// spend that width. Phone loses the tie-break — nothing on this page acts on
+// it, and the full number is a click away on the person's details page.
 function TeamSection({ people, users, onChanged, showReportsTo = false, emptyMessage }) {
     return (
         <EmployeeTable
@@ -26,6 +33,7 @@ function TeamSection({ people, users, onChanged, showReportsTo = false, emptyMes
             onChanged={onChanged}
             showReportsTo={showReportsTo}
             showProfileStatus
+            showPhone={false}
             emptyMessage={emptyMessage}
         />
     );
@@ -35,8 +43,8 @@ function TeamSection({ people, users, onChanged, showReportsTo = false, emptyMes
 // sits *above* their table rather than being a "Reports To" column repeated
 // on every row — same reasoning as EmployeeTeamCard.jsx on the org view: who
 // reports to whom reads better as a visual grouping than as a column to scan.
-// Dropping that column also gives the remaining ones (email, phone,
-// designation) the width they were competing for.
+// Dropping that column also gives the remaining ones (email, designation)
+// the width they were competing for.
 //
 // A heading, not a tinted manager row like EmployeeTeamCard's: on this page
 // the manager is almost always one of the viewer's own direct reports, so

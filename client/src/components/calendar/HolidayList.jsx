@@ -53,10 +53,16 @@ function HolidayRow({ holiday, canManage, onEdit, onChanged, isSelected, registe
             <td className={`${tdClasses} text-right`}>
                 {canManage && (
                     <div className="flex items-center justify-end gap-1">
+                        {/* `tooltipPortal` on both, like every other icon
+                            button in a table row — these two labels embed the
+                            holiday's name, so they're the longest in the app
+                            and were generating 38px of phantom horizontal
+                            scroll on this card. See IconButton.jsx. */}
                         <IconButton
                             icon={Pencil}
                             label={`Edit ${holiday.name}`}
                             size="sm"
+                            tooltipPortal
                             onClick={() => onEdit(holiday)}
                         />
                         <IconButton
@@ -65,6 +71,7 @@ function HolidayRow({ holiday, canManage, onEdit, onChanged, isSelected, registe
                             variant="danger"
                             size="sm"
                             loading={busy}
+                            tooltipPortal
                             onClick={handleDelete}
                         />
                     </div>
