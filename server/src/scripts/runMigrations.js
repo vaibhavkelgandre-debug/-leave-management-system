@@ -1,8 +1,9 @@
 // CLI for the migration ledger. Three subcommands, one entry point:
 //
-//   node src/scripts/runMigrations.js              apply everything pending
-//   node src/scripts/runMigrations.js status       report, change nothing
-//   node src/scripts/runMigrations.js baseline     dry run; --yes to write
+//   node src/scripts/runMigrations.js                     apply what's pending
+//   node src/scripts/runMigrations.js status              report, change nothing
+//   node src/scripts/runMigrations.js status --verbose    ... and print the ledger
+//   node src/scripts/runMigrations.js baseline            dry run; --yes to write
 //
 // The bare form is unchanged from when this file replayed every migration on
 // every run, so `npm run migrate`, the READMEs and anyone's muscle memory all
@@ -40,10 +41,25 @@ function describeTarget() {
     return `${process.env.DB_NAME} on ${process.env.DB_HOST}:${process.env.DB_PORT}`;
 }
 
-async function status() {
-    const { files, applied, pending, changed, orphaned } = await inspect({ pool, dir: sqlDir });
+async function status(flags) {
+    const { files, applied, rows, pending, changed, orphaned } = await inspect({ pool, dir: sqlDir });
 
     console.log(`${applied.size} of ${files.length} migration(s) recorded as applied.`);
+
+    // The ledger itself, on request — otherwise "what's actually in that
+    // table?" needs a SQL client, which is a silly thing to require for a
+    // table this app owns.
+    if (flags.includes("--verbose") && rows.length) {
+        console.log("");
+        for (const row of rows) {
+            const when = row.applied_at.toISOString().replace("T", " ").slice(0, 19);
+            // Baselined rows carry duration 0 — they were recorded, not run,
+            // and that distinction is worth being able to see.
+            const how = row.duration_ms === 0 ? "baselined" : `${row.duration_ms}ms`;
+            console.log(`  ${when}  ${row.filename}  (${how})`);
+        }
+        console.log("");
+    }
 
     if (pending.length) {
         console.log(`\n${pending.length} pending:`);
@@ -73,7 +89,7 @@ async function main() {
         return;
     }
     if (command === "status") {
-        await status();
+        await status(flags);
         return;
     }
     if (command === "baseline") {

@@ -61,9 +61,12 @@ $env:DB_NAME = "leave_management_system_test"; npm run migrate; Remove-Item Env:
 > ℹ️ **The runner keeps a ledger, so it applies only what's new.** A `schema_migrations` table records every applied file with a checksum, so `npm run migrate` against an already-migrated database applies the pending files and skips the rest — you never have to work out which ones are new.
 >
 > ```bash
-> npm run migrate            # apply everything pending
-> npm run migrate:status     # what is applied, pending, edited or missing
+> npm run migrate                        # apply everything pending
+> npm run migrate:status                 # what is applied, pending, edited or missing
+> npm run migrate:status -- --verbose    # ...and print the ledger itself
 > ```
+>
+> `--verbose` lists every recorded file with when it was applied and how long it took, marking rows written by `baseline` as `baselined` rather than timed — so "was this actually executed here, or just recorded?" is answerable without a SQL client.
 >
 > Each file runs in its own transaction together with its ledger row, so a failure leaves nothing half-applied. Editing a file that already ran aborts the next run, since that would mean two environments running different schemas.
 

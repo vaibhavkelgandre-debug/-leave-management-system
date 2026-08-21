@@ -80,6 +80,15 @@ async function appliedChecksums(client, table) {
     return new Map(result.rows.map((row) => [row.filename, row.checksum]));
 }
 
+// The ledger as rows rather than as a lookup — for showing someone what's in
+// the table, which is otherwise a question that needs a SQL client.
+async function appliedRows(client, table) {
+    const result = await client.query(
+        `SELECT filename, checksum, applied_at, duration_ms FROM ${table} ORDER BY filename`
+    );
+    return result.rows;
+}
+
 // Compares what's on disk against what's recorded, without changing anything.
 // Three categories, and they answer three different questions:
 //   pending  — what a run would apply
@@ -100,7 +109,7 @@ export async function inspect({ pool, dir, table = DEFAULT_TABLE }) {
         const onDisk = new Set(files.map((file) => file.filename));
         const orphaned = [...applied.keys()].filter((filename) => !onDisk.has(filename)).sort();
 
-        return { files, applied, pending, changed, orphaned };
+        return { files, applied, rows: await appliedRows(client, table), pending, changed, orphaned };
     } finally {
         client.release();
     }

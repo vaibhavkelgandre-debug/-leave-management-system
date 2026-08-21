@@ -165,6 +165,7 @@ Client → Routes → Validator → Controller → Service → Repository → Po
 > |---|---|
 > | `npm run migrate` | applies every pending file, in order |
 > | `npm run migrate:status` | reports applied/pending/edited/orphaned, changes nothing |
+> | `npm run migrate:status -- --verbose` | as above, plus the ledger rows — `baselined` marks a row recorded rather than executed |
 > | `npm run migrate:baseline` | records all files as applied **without executing them** — dry run unless given `-- --yes` |
 > | `npm run migrate:baseline -- --yes --pending-only` | records only the *unrecorded* files — recovery for a ledger left partial by a failed run |
 >
