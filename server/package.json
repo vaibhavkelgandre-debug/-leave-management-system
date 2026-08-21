@@ -31,7 +31,6 @@
     "google-auth-library": "^11.0.0",
     "jsonwebtoken": "^9.0.3",
     "multer": "^2.2.0",
-    "nodemailer": "^9.0.5",
     "pdfkit": "^0.19.1",
     "pg": "^8.22.0",
     "zod": "^4.4.3"

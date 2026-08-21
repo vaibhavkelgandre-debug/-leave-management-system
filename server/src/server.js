@@ -19,7 +19,7 @@ const PORT = process.env.PORT || 5001;
 // to start would be a worse outcome than a degraded reset flow. Note this
 // file is never loaded by the tests, which import app.js directly.
 if (!isMailConfigured()) {
-    console.warn("SMTP is not configured — no email will be sent (links are logged instead)");
+    console.warn("Mail provider is not configured — no email will be sent (links are logged instead)");
 }
 // Which flows are switched on, resolved from the environment (see
 // config/mailFeatures.js). Printed rather than left implicit because a

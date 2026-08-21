@@ -1,175 +1,122 @@
-// The one and only module in this codebase that knows a mail provider
-// exists. Nodemailer/SMTP was chosen to get the flow working end to end and
-// is explicitly temporary — swapping to an HTTP-API provider (Resend,
-// SendGrid) means rewriting `sendMail` below and nothing else.
+// The one and only module in this codebase that knows a mail provider exists.
 //
-// That temporariness is why this deviates from the config/cloudinary.js
-// precedent it otherwise mirrors: that file exports a configured *client*,
-// because the Cloudinary SDK is the only Cloudinary implementation we'll
-// ever have, so exposing it costs nothing. Here, exporting a nodemailer
-// transporter would leak the provider's shape into mailService.js and make
-// the swap a two-file change. Exporting a function keeps it to one.
+// This is the swap the previous version of this file predicted: it used
+// nodemailer over Gmail SMTP, called that "explicitly temporary", and noted
+// that moving to an HTTP-API provider would mean rewriting `sendMail` and
+// nothing else. That held — this file changed and mailService.js,
+// mailFeatures.js, mailLayout.js and every caller did not.
 //
-// `{ to, subject, text, html }` is deliberately the exact intersection of
-// nodemailer's sendMail, Resend's emails.send and @sendgrid/mail's send —
-// all three accept those keys under those names, so this isn't an invented
-// abstraction. Resist adding cc/bcc until something needs them: that's
-// precisely where the three providers diverge.
+// Why the swap was forced, so nobody tries to go back: **Render blocks
+// outbound SMTP.** Ports 587 and 465 both fail with a TCP connect timeout
+// (5s, before any TLS or auth), and a silent drop rather than ECONNREFUSED is
+// the signature of a firewall, not a slow host — a TCP handshake to Google is
+// one round trip. Before that surfaced, the same setup failed differently and
+// far more confusingly: nodemailer resolves A and AAAA records separately and
+// picks one at *random*, so sends died on `connect ENETUNREACH 2404:6800:…`
+// whenever the coin landed on IPv6, which Render has no route for. Pinning to
+// IPv4 fixed that and revealed the port block underneath. No amount of SMTP
+// configuration gets mail out of Render.
 //
-// `attachments` was added for exactly one reason — the payslip PDF emailed
-// after a payroll run (mailService.sendSalarySlipEmail) — and is the one
-// place this abstraction is *not* a free intersection, so it's normalized
-// here rather than passed through raw. All three providers accept a
-// `{ filename, content }` pair, but they disagree on everything around it:
-// nodemailer takes `content` as a Buffer/stream/string plus `contentType`,
-// Resend takes `content` as a Buffer or base64 string, SendGrid demands
-// base64 in `content` and requires `type`. Callers therefore hand over
-// `{ filename, content: Buffer, contentType }` and this function maps it to
-// whatever the current provider wants — keeping the swap a one-file change,
-// which is the whole point of this module.
-import dns from "node:dns/promises";
-import net from "node:net";
-import nodemailer from "nodemailer";
+// HTTPS on 443 is not blocked, which is the whole reason this works.
+//
+// Deliberately no `@sendgrid/mail` dependency: the v3 send endpoint is one
+// POST with a JSON body, `fetch` is global in Node 18+, and a package buys
+// nothing but risk here — an uncommitted nodemailer entry in package.json is
+// what crashed this project's Render deploy at boot earlier. Zero new
+// dependencies means that failure mode cannot recur.
+//
+// This still exports a *function*, not a client — the same deviation from
+// config/cloudinary.js's precedent, for the same reason. Exposing a provider
+// object would leak its shape into mailService.js and make the next swap a
+// two-file change.
+//
+// `{ to, subject, text, html }` remains the exact intersection of SendGrid's,
+// Resend's and nodemailer's send calls, so it stays swappable. Resist adding
+// cc/bcc until something needs them: that's precisely where providers diverge.
+//
+// `attachments` is the one key that is *not* a free intersection, and exists
+// for exactly one caller — the payslip PDF (mailService.sendSalarySlipEmail).
+// Callers hand over `{ filename, content: Buffer, contentType }` and this
+// function maps it to whatever the current provider wants. SendGrid demands
+// base64 in `content` plus `type` and `disposition`; nodemailer took a raw
+// Buffer; Resend takes either. Keep that mapping explicit here rather than
+// spreading the caller's object through, so the next swap stays one file.
 import dotenv from "dotenv";
 
 dotenv.config();
 
-// Nodemailer's defaults are 120s connect / 30s greeting / 600s socket — a
-// hung SMTP server would hold a socket for ten minutes. Capped hard.
-const CONNECTION_TIMEOUT_MS = 5_000;
-const GREETING_TIMEOUT_MS = 5_000;
-const SOCKET_TIMEOUT_MS = 10_000;
+const SEND_ENDPOINT = "https://api.sendgrid.com/v3/mail/send";
 
-// Google displays an App Password as four space-separated groups, and it's
-// routinely pasted into .env verbatim — which fails authentication with an
-// unhelpful error. Strip whitespace rather than making everyone debug it.
-function smtpPassword() {
-    return (process.env.SMTP_PASS || "").replace(/\s+/g, "");
+// A hung provider must not hold a request open indefinitely. The old SMTP
+// transport capped connect/greeting/socket separately; one HTTP request needs
+// one budget. 10s is generous for a JSON POST and still well inside any
+// reasonable proxy timeout — and the payslip flow sends sequentially *after*
+// responding, so a slow provider delays that loop rather than a user's wait.
+const REQUEST_TIMEOUT_MS = 10_000;
+
+// SendGrid wants `from` as `{ email, name }`, but MAIL_FROM is conventionally
+// one RFC-5322 string. Parse the display-name form rather than making every
+// deployment configure the same identity twice.
+//
+// The bare-address form is the common case and passes through untouched.
+//
+// Both quoting mistakes are absorbed rather than passed on, because an env var
+// that literally contains quotes is a *known* deployment error here: dotenv
+// strips surrounding quotes from a .env file and hosting dashboards do not, so
+// the value that works locally arrives quoted in production. `"Name <addr>"`
+// (the whole thing quoted) and `"Name" <addr>` (only the display name, the RFC
+// form) therefore both parse to the same sender. The old nodemailer parser
+// turned the first into the garbage address `"Name <addr"@example.com` and sent
+// it anyway; failing loudly would be better than that, but not failing at all
+// is better still.
+function parseFrom(value) {
+    let raw = (value || "").trim();
+    // Only a pair wrapping the *entire* value — `"Name" <addr>` ends in `>`,
+    // so the RFC form is untouched by this.
+    const wrapped = raw.match(/^"(.*)"$/);
+    if (wrapped) raw = wrapped[1].trim();
+    if (!raw) return null;
+
+    const angled = raw.match(/^(.*)<([^>]+)>\s*$/);
+    if (!angled) return { email: raw };
+
+    const name = angled[1].trim().replace(/^"(.*)"$/, "$1").trim();
+    const email = angled[2].trim();
+    return name ? { email, name } : { email };
+}
+
+// No fallback, unlike the SMTP version which could default to SMTP_USER
+// because the authenticated mailbox *was* the sender. SendGrid rejects a send
+// whose `from` isn't a verified sender, so a missing MAIL_FROM has to read as
+// "unconfigured" (log the message) instead of 403-ing on every send.
+function fromAddress() {
+    return parseFrom(process.env.MAIL_FROM);
+}
+
+function apiKey() {
+    // Pasted keys routinely carry a trailing newline or stray spaces, which
+    // produces a 401 indistinguishable from a wrong key. Same reasoning as
+    // the Gmail App Password whitespace strip this replaces.
+    return (process.env.SENDGRID_API_KEY || "").trim();
 }
 
 // Input: none. Output: true when there's enough config to attempt a send.
-// Checks the credentials, not just the host, because a half-filled .env is
-// the common failure and would otherwise surface as a per-send auth error.
+// Checks the sender as well as the key, because SendGrid refuses an
+// unverified `from` and a half-filled environment is the common failure —
+// which would otherwise surface as a 403 on every send rather than the
+// unconfigured fallback below.
 export function isMailConfigured() {
-    return Boolean(process.env.SMTP_HOST && process.env.SMTP_USER && smtpPassword());
-}
-
-// Falls back to SMTP_USER because most providers (Gmail/Workspace included)
-// reject or silently rewrite a From that isn't the authenticated mailbox or
-// one of its verified aliases. Kept here rather than in the templates so
-// per-provider sender rules stay in one file.
-function fromAddress() {
-    return process.env.MAIL_FROM || process.env.SMTP_USER;
-}
-
-// `secure: true` is implicit TLS (port 465); `false` negotiates STARTTLS on
-// a plaintext port (587 — what Gmail/Workspace expect, and what works from
-// Render, which blocks outbound 25). Read as a string comparison because
-// every env var is a string and Boolean("false") is true.
-//
-// No connection pooling: pooling is for bulk sends, and a pooled connection
-// idle between password resets gets closed server-side, producing a
-// stale-socket failure on the next send.
-function transportOptions({ host, servername }) {
-    return {
-        host,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: process.env.SMTP_SECURE === "true",
-        auth: { user: process.env.SMTP_USER, pass: smtpPassword() },
-        connectionTimeout: CONNECTION_TIMEOUT_MS,
-        greetingTimeout: GREETING_TIMEOUT_MS,
-        socketTimeout: SOCKET_TIMEOUT_MS,
-        // Set only when `host` is an IP literal (see getTransporter below):
-        // without it TLS validates the certificate against the address rather
-        // than smtp.gmail.com and every send fails on a hostname mismatch.
-        ...(servername ? { tls: { servername } } : {}),
-    };
-}
-
-// Why this resolves DNS itself instead of handing nodemailer the hostname.
-//
-// Nodemailer does not use dns.lookup. lib/shared/index.js calls resolve4 and
-// resolve6 separately, concatenates the results IPv4-first, then picks one at
-// *random*, keeping the others as connect-failure fallbacks. Render has no
-// IPv6 route, so any pick landing on an AAAA record fails with ENETUNREACH —
-// and when the platform resolver returns no A record at all there is no
-// fallback left to try. That is exactly how
-// "connect ENETUNREACH 2404:6800:4003:c05::6d:587" reached production with
-// every invite and password reset silently undelivered, while the identical
-// config worked locally.
-//
-// Handing nodemailer an IPv4 literal makes its own resolution a no-op (it
-// short-circuits on an IP), so the address family cannot be chosen wrongly.
-//
-// Deliberately falls back to the hostname if the A lookup fails: that is the
-// pre-existing behaviour, so a resolver hiccup can never leave us worse off
-// than not pinning at all.
-const HOST_CACHE_TTL_MS = 5 * 60 * 1000;
-
-let cachedTransporter = null;
-let cachedUntil = 0;
-
-// Random rather than [0], for the reason nodemailer itself randomizes —
-// spread across Google's pool — and so the retry after an invalidated cache
-// can land on a different address.
-function pick(addresses) {
-    return addresses.length ? addresses[Math.floor(Math.random() * addresses.length)] : null;
-}
-
-// `dns.lookup` first, `dns.resolve4` only as a backstop, and the order is the
-// whole point: resolve4 is c-ares, which talks to the nameservers in
-// /etc/resolv.conf itself — the exact path nodemailer uses, and the one that
-// came back with no A record at all on Render. dns.lookup instead calls the
-// platform's getaddrinfo, so it honours the container's full resolution stack
-// (nsswitch, /etc/hosts, any DNS64 synthesis) and returns what the host
-// itself would connect to. Pinning via the mechanism that already failed
-// would have reproduced the bug it was written to fix.
-async function ipv4For(host) {
-    if (!host || net.isIP(host)) return null;
-
-    try {
-        const results = await dns.lookup(host, { family: 4, all: true });
-        const address = pick(results.map((entry) => entry.address));
-        if (address) return address;
-    } catch {
-        // Fall through — resolve4 may still answer.
-    }
-
-    return pick(await dns.resolve4(host));
-}
-
-// Built lazily and cached rather than at module load, because resolution is
-// async. The TTL means a rotated Google IP is picked up without a restart,
-// and rebuilding is cheap precisely because there is no pool to warm.
-async function getTransporter() {
-    if (!isMailConfigured()) return null;
-    if (cachedTransporter && Date.now() < cachedUntil) return cachedTransporter;
-
-    const host = process.env.SMTP_HOST;
-    let options = transportOptions({ host });
-
-    try {
-        const address = await ipv4For(host);
-        if (address) options = transportOptions({ host: address, servername: host });
-    } catch (error) {
-        console.warn(
-            `Could not resolve an IPv4 address for ${host} (${error.code || error.message}) — using the hostname`
-        );
-    }
-
-    cachedTransporter = nodemailer.createTransport(options);
-    cachedUntil = Date.now() + HOST_CACHE_TTL_MS;
-    return cachedTransporter;
+    return Boolean(apiKey() && fromAddress());
 }
 
 // Input: one message, described in provider-neutral terms, where
 // `attachments` (optional) is a list of `{ filename, content: Buffer,
-// contentType }`. Output: `true` when the message was actually handed to the
-// transport, `false` when a non-sending path below short-circuited it —
-// callers that report "we emailed it" to a user (invitations) need to tell
-// those two apart, and guessing from `isMailConfigured()` at the call site
-// would duplicate this function's own rules. Failure mode: rejects if the
-// transport rejects (bad credentials, connection refused, timeout) — callers
+// contentType }`. Output: `true` when the message actually reached the
+// provider, `false` when a non-sending path below short-circuited it —
+// callers that tell a human "we emailed them" (the invite flow's `emailSent`)
+// need to tell those apart, and guessing from `isMailConfigured()` at the
+// call site would duplicate this function's own rules. Failure mode: rejects
+// if the provider rejects (bad key, unverified sender, network) — callers
 // decide whether that's fatal, the same convention cloudinaryService.js
 // follows.
 //
@@ -177,20 +124,21 @@ async function getTransporter() {
 //   - Under NODE_ENV=test, never send. config/cloudinary.js's own
 //     dotenv.config() already leaks server/.env into the test process
 //     (setup.js loads .env.test with override, but a key absent there and
-//     present in .env still lands), so real SMTP credentials WILL be visible
-//     to the suite. Without this guard, any future test touching a mail path
+//     present in .env still lands), so real credentials WILL be visible to
+//     the suite. Without this guard, any future test touching a mail path
 //     without stubbing this module would send real email.
 //   - Unconfigured: log the message instead. That's the local-dev fallback,
 //     and living here rather than in the caller means every future sender
-//     (invites, etc.) inherits it for free.
+//     inherits it for free. Note it logs the full plain-text body, which for
+//     invites and resets *contains a live link* — harmless on a laptop, a
+//     credential leak into log aggregation in a deployed environment, which
+//     is why isMailConfigured() must be true anywhere real.
 export async function sendMail({ to, subject, text, html, attachments }) {
     if (process.env.NODE_ENV === "test") return false;
 
-    const transporter = await getTransporter();
-
-    if (!transporter) {
-        // Attachment *contents* are never logged — a payslip PDF in the
-        // dev console would be both useless and a data leak into log
+    if (!isMailConfigured()) {
+        // Attachment *contents* are never logged — a payslip PDF in the dev
+        // console would be both useless and a data leak into log
         // aggregation. Names only, so the fallback still shows what would
         // have gone out.
         const attachmentNames = (attachments ?? []).map((file) => file.filename).join(", ");
@@ -199,35 +147,54 @@ export async function sendMail({ to, subject, text, html, attachments }) {
         return false;
     }
 
-    const message = {
+    // Order matters: SendGrid requires content parts in ascending MIME
+    // preference, so text/plain must precede text/html or the API 400s.
+    const content = [{ type: "text/plain", value: text }];
+    if (html) content.push({ type: "text/html", value: html });
+
+    const payload = {
+        personalizations: [{ to: [{ email: to }] }],
         from: fromAddress(),
-        to,
         subject,
-        text,
-        html,
-        // nodemailer happens to take the same shape callers pass in, so this
-        // is a passthrough *today* — mapped explicitly anyway (rather than
-        // spreading the caller's object) so a provider swap has one obvious
-        // place to translate, and so an unexpected key can't reach the
-        // provider. Omitted entirely when there's nothing to attach.
+        content,
         ...(attachments?.length
             ? {
                   attachments: attachments.map((file) => ({
                       filename: file.filename,
-                      content: file.content,
-                      contentType: file.contentType,
+                      content: file.content.toString("base64"),
+                      type: file.contentType,
+                      disposition: "attachment",
                   })),
               }
             : {}),
     };
 
+    let response;
     try {
-        await transporter.sendMail(message);
+        response = await fetch(SEND_ENDPOINT, {
+            method: "POST",
+            headers: {
+                Authorization: `Bearer ${apiKey()}`,
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(payload),
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        });
     } catch (error) {
-        // Drop the pinned address so the next send re-resolves: one dead IP in
-        // Google's pool would otherwise keep failing for the whole TTL.
-        cachedTransporter = null;
-        throw error;
+        // fetch rejects only on a network-level failure or the timeout above;
+        // an HTTP error status resolves normally and is handled below. Both
+        // become one thrown Error so callers see a single failure shape.
+        throw new Error(`Mail provider unreachable: ${error.message}`);
+    }
+
+    // 202 Accepted is the success case and its body is empty, so there's
+    // nothing to parse or return. Anything else carries a JSON `errors` array
+    // whose messages are the only way to tell a bad key from an unverified
+    // sender — surface them instead of a bare status code, because that
+    // distinction is exactly what a deployment needs from the log line.
+    if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        throw new Error(`Mail provider rejected the message (${response.status}): ${detail.slice(0, 500)}`);
     }
 
     return true;
